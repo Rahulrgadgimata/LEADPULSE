@@ -1,0 +1,16 @@
+{
+  "name": "leadpulse-ai",
+  "version": "1.0.0",
+  "description": "LeadPulse AI — B2B SaaS platform that automates outbound sales prospecting with AI-powered lead discovery and scoring",
+  "private": true,
+  "scripts": {
+    "dev": "cd backend && npm run dev",
+    "start": "cd backend && npm start",
+    "install:all": "cd backend && npm install",
+    "demo": "cd frontend && npx serve -s . -l 5500",
+    "test": "cd backend && npm test"
+  },
+  "keywords": ["leadgen", "b2b", "saas", "ai", "sales", "prospecting"],
+  "author": "Asan Innovators",
+  "license": "PROPRIETARY"
+}
