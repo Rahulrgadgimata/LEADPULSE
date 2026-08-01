@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 COPY backend/package.json backend/package-lock.json* ./backend/
-RUN cd backend && npm ci --omit=dev
+RUN cd backend && npm install --omit=dev
 
 COPY backend/scrapling/requirements.txt ./backend/scrapling/
 RUN pip3 install --break-system-packages -r backend/scrapling/requirements.txt \
