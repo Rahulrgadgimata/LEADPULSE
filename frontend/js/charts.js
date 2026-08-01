@@ -1,6 +1,6 @@
 /**
- * LeadPulse AI — Next-Gen Analytics Charts Module
- * 5-Dimension Radar Chart + Tier Funnel Donut + Score Distribution Histogram
+ * LeadPulse AI — Analytics Charts Module
+ * 5-Dimension Radar + Tier Funnel Donut + Score Distribution
  */
 
 const Charts = {
@@ -20,14 +20,10 @@ const Charts = {
     this.instances = {};
   },
 
-  /**
-   * 5-Dimension Radar Chart
-   */
   renderDimensionRadar(leads) {
     const ctx = document.getElementById('chart-radar-dimensions');
     if (!ctx || leads.length === 0) return;
 
-    // Calculate average scores per dimension across all current leads
     const avgIntent = Math.round(leads.reduce((s, l) => s + (l.intent_score || 0), 0) / leads.length);
     const avgProfile = Math.round(leads.reduce((s, l) => s + (l.profile_fit_score || 0), 0) / leads.length);
     const avgCompany = Math.round(leads.reduce((s, l) => s + (l.company_fit_score || 0), 0) / leads.length);
@@ -41,10 +37,10 @@ const Charts = {
         datasets: [{
           label: 'Current Pipeline Avg',
           data: [avgIntent, avgProfile, avgCompany, avgRecency, avgEngagement],
-          borderColor: '#06b6d4',
-          backgroundColor: 'rgba(6, 182, 212, 0.25)',
-          pointBackgroundColor: '#06b6d4',
-          pointBorderColor: '#030712',
+          borderColor: '#0d9488',
+          backgroundColor: 'rgba(13, 148, 136, 0.2)',
+          pointBackgroundColor: '#0d9488',
+          pointBorderColor: '#ffffff',
           pointHoverRadius: 6,
         }]
       },
@@ -52,13 +48,13 @@ const Charts = {
         responsive: true,
         plugins: {
           legend: { display: false },
-          tooltip: { backgroundColor: '#111827', titleColor: '#fff', bodyColor: '#9ca3af' }
+          tooltip: { backgroundColor: '#0f172a', titleColor: '#fff', bodyColor: '#cbd5e1' }
         },
         scales: {
           r: {
-            angleLines: { color: 'rgba(255, 255, 255, 0.08)' },
-            grid: { color: 'rgba(255, 255, 255, 0.08)' },
-            pointLabels: { color: '#9ca3af', font: { family: 'Inter', size: 11, weight: 600 } },
+            angleLines: { color: 'rgba(15, 23, 42, 0.08)' },
+            grid: { color: 'rgba(15, 23, 42, 0.08)' },
+            pointLabels: { color: '#64748b', font: { family: 'Outfit', size: 11, weight: 600 } },
             ticks: { display: false, min: 0, max: 100 }
           }
         }
@@ -66,9 +62,6 @@ const Charts = {
     });
   },
 
-  /**
-   * Tier Breakdown Donut Chart
-   */
   renderTierDonut(leads) {
     const ctx = document.getElementById('chart-tier-donut');
     if (!ctx) return;
@@ -80,10 +73,10 @@ const Charts = {
     this.instances.donut = new Chart(ctx, {
       type: 'doughnut',
       data: {
-        labels: ['🔥 Hot (70-100)', '🌤️ Warm (40-69)', '❄️ Cold (0-39)'],
+        labels: ['Hot (70-100)', 'Warm (40-69)', 'Cold (0-39)'],
         datasets: [{
           data: [hot, warm, cold],
-          backgroundColor: ['#10b981', '#f59e0b', '#f43f5e'],
+          backgroundColor: ['#059669', '#d97706', '#e11d48'],
           borderWidth: 0,
           hoverOffset: 6
         }]
@@ -94,16 +87,13 @@ const Charts = {
         plugins: {
           legend: {
             position: 'bottom',
-            labels: { color: '#9ca3af', font: { family: 'Inter', size: 11 } }
+            labels: { color: '#64748b', font: { family: 'Outfit', size: 11 } }
           }
         }
       }
     });
   },
 
-  /**
-   * Score Histogram Bar Chart
-   */
   renderScoreBar(leads) {
     const ctx = document.getElementById('chart-score-bar');
     if (!ctx) return;
@@ -127,7 +117,7 @@ const Charts = {
         datasets: [{
           label: 'Prospect Count',
           data: data,
-          backgroundColor: '#3b82f6',
+          backgroundColor: '#0284c7',
           borderRadius: 6
         }]
       },
@@ -135,8 +125,8 @@ const Charts = {
         responsive: true,
         plugins: { legend: { display: false } },
         scales: {
-          x: { grid: { display: false }, ticks: { color: '#6b7280' } },
-          y: { grid: { color: 'rgba(255, 255, 255, 0.05)' }, ticks: { color: '#6b7280' } }
+          x: { grid: { display: false }, ticks: { color: '#64748b' } },
+          y: { grid: { color: 'rgba(15, 23, 42, 0.06)' }, ticks: { color: '#64748b' } }
         }
       }
     });

@@ -1,0 +1,2 @@
+# Install Scrapling from PyPI in Docker/CI (upstream clone is local-only).
+scrapling[fetchers]>=0.4.12

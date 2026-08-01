@@ -1,8 +1,7 @@
 const winston = require('winston');
-const config = require('../config/env');
 
 const logger = winston.createLogger({
-  level: config.logging.level,
+  level: process.env.LOG_LEVEL || 'info',
   format: winston.format.combine(
     winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
     winston.format.errors({ stack: true }),

@@ -4,20 +4,33 @@
  */
 
 const App = {
+  // Same-origin by default; see js/config.js for split-host deployments.
+  API_BASE: (window.LEADPULSE_API_BASE || '').replace(/\/$/, ''),
+  ACTIVE_ICP_KEY: 'leadpulse_active_icp_id',
+
   allLeads: [],
   filteredLeads: [],
 
   async init() {
     Modal.init();
     this.bindEvents();
+
+    // Resolve the active ICP before anything fetches data. Without this the
+    // dashboard loaded with no target and pulled every lead from every ICP,
+    // while the header showed the placeholder baked into the HTML.
+    await this.restoreActiveICP();
+
+    // Model names shown in the UI come from the server, so they cannot drift
+    // out of date the way the hardcoded "Groq Llama-3" labels did.
+    await this.applyEngineStatus();
+
     this.initRadarStream();
     this.initCopilotChat();
 
-    // Fetch real discovered leads from backend API
     await this.refreshLeadsFromBackend();
 
-    // If backend returns no leads on initial startup, automatically trigger real-time discovery!
-    if (this.allLeads.length === 0) {
+    // If this ICP has no leads yet, discover for it automatically.
+    if (this.allLeads.length === 0 && window.ACTIVE_ICP?.id) {
       await this.triggerDiscoveryPipeline();
     }
 
@@ -25,18 +38,92 @@ const App = {
   },
 
   /**
-   * Triggered whenever user switches or updates the Target ICP
+   * Work out which ICP is active on page load: the one last chosen, else the
+   * first active one on the server. The choice is kept in localStorage because
+   * window.ACTIVE_ICP is memory-only and did not survive a refresh.
+   */
+  async restoreActiveICP() {
+    let icps = [];
+    try {
+      const res = await fetch(`${this.API_BASE}/api/icp`);
+      if (res.ok) icps = await res.json();
+    } catch (err) {
+      console.warn('Could not load ICPs:', err.message);
+    }
+
+    if (!Array.isArray(icps) || icps.length === 0) {
+      this.setActiveICP(null);
+      return;
+    }
+
+    const savedId = localStorage.getItem(this.ACTIVE_ICP_KEY);
+    const icp = (savedId && icps.find(i => i.id === savedId)) ||
+                icps.find(i => i.is_active) ||
+                icps[0];
+
+    this.setActiveICP(icp);
+  },
+
+  /**
+   * Fill in the engine labels from the server's real configuration.
+   * These were previously hardcoded to "Groq Llama-3", which silently went
+   * stale the moment the models changed.
+   */
+  async applyEngineStatus() {
+    const setText = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+
+    try {
+      const res = await fetch(`${this.API_BASE}/api/status`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      this.engineStatus = data;
+
+      const extraction = data.models?.extraction || 'unknown model';
+      const chatModel = data.models?.chat || 'unknown model';
+
+      setText('engine-status-label', `${extraction} active`);
+      setText('scoring-engine-label', `5-dimension scoring · explanations by ${extraction}`);
+      setText('copilot-title', `AI Sales Copilot · ${chatModel}`);
+
+      const enabled = Object.entries(data.providers || {})
+        .filter(([, v]) => v.configured).length;
+      setText('dedup-footer', `Deduplicated across ${enabled} configured source${enabled === 1 ? '' : 's'}`);
+    } catch (err) {
+      setText('engine-status-label', 'API unreachable');
+      console.warn('Engine status unavailable:', err.message);
+    }
+  },
+
+  /**
+   * Single place that changes the active target: keeps window.ACTIVE_ICP, the
+   * header label and the persisted id in step.
+   */
+  setActiveICP(icp) {
+    window.ACTIVE_ICP = icp || null;
+    this.activeICP = window.ACTIVE_ICP;
+
+    const headerName = document.getElementById('current-icp-name');
+    if (headerName) headerName.textContent = icp?.name || 'No ICP selected';
+
+    if (icp?.id) localStorage.setItem(this.ACTIVE_ICP_KEY, icp.id);
+    else localStorage.removeItem(this.ACTIVE_ICP_KEY);
+  },
+
+  /**
+   * Triggered whenever the user switches or updates the Target ICP.
    */
   async onICPChanged(icpData) {
-    this.activeICP = icpData;
-    const headerName = document.getElementById('current-icp-name');
-    if (headerName) headerName.textContent = icpData.name;
+    this.setActiveICP(icpData);
 
-    // Refresh leads matching the newly selected target ICP
-    await this.refreshLeadsFromBackend(icpData.id);
+    // Refresh leads and the signal stream for the newly selected target ICP
+    await this.refreshLeadsFromBackend(icpData?.id);
+    await this.refreshRadarStream();
 
     // If no leads exist for this new ICP yet, run discovery automatically for this target
-    if (this.allLeads.length === 0) {
+    if (this.allLeads.length === 0 && icpData?.id) {
       await this.triggerDiscoveryPipeline();
     }
   },
@@ -137,37 +224,128 @@ const App = {
     if (elWarm) elWarm.textContent = warm;
     if (elAvg) elAvg.textContent = avgScore;
     if (elHotPct) elHotPct.textContent = `${hotPct}% of pipeline`;
+
+    // Real source breakdown. This slot used to read "+24% this week", a figure
+    // nothing computed.
+    const elTrend = document.getElementById('leads-trend');
+    if (elTrend) {
+      const bySource = {};
+      for (const lead of leads) {
+        const key = (lead.source || 'unknown').replace(/_/g, ' ');
+        bySource[key] = (bySource[key] || 0) + 1;
+      }
+      const parts = Object.entries(bySource)
+        .sort((a, b) => b[1] - a[1])
+        .map(([k, v]) => `${v} ${k}`);
+      elTrend.textContent = parts.length ? parts.join(' · ') : 'no leads yet';
+    }
   },
 
   /**
-   * Simulate Live Discovery Stream Radar
+   * Live Discovery Stream Radar
+   */
+  SIGNAL_ICONS: {
+    news: '📰',
+    job_posting: '💼',
+    social: '💬',
+    web: '🔍',
+    linkedin: '🔗'
+  },
+
+  /**
+   * Live discovery stream, backed by the signals the collectors actually stored.
+   *
+   * This previously rendered a fixed list of invented events ("TechNova hiring
+   * 3x DevOps Engineers"), so the panel looked live while showing nothing real.
    */
   initRadarStream() {
     const streamFeed = document.getElementById('stream-feed');
     if (!streamFeed) return;
 
-    const mockEvents = [
-      { icon: '💼', title: 'TechNova hiring 3x DevOps Engineers', desc: 'Discovered via Google Jobs & Greenhouse RSS' },
-      { icon: '📰', title: 'Cortex Dynamics Series B funding announcement', desc: 'Detected via TechCrunch & NewsAPI monitor' },
-      { icon: '💬', title: 'CTO post on r/DevOps about cloud scaling', desc: 'Scraped from Reddit API signal monitor' },
-      { icon: '🔍', title: 'Apollo contact enrichment updated for DataStream', desc: 'Verified 4 decision maker email patterns' },
-      { icon: '🔥', title: 'Pinnacle Payments score upgraded to 83 (Hot)', desc: 'Re-scored automatically via 5-dimension engine' }
-    ];
+    this.refreshRadarStream();
+
+    // The panel is labelled LIVE, so keep it current while the tab is open.
+    if (this.radarTimer) clearInterval(this.radarTimer);
+    this.radarTimer = setInterval(() => {
+      if (!document.hidden) this.refreshRadarStream();
+    }, 15000);
+  },
+
+  async refreshRadarStream() {
+    const streamFeed = document.getElementById('stream-feed');
+    if (!streamFeed) return;
+
+    const icpId = window.ACTIVE_ICP?.id;
+    const url = `${this.API_BASE}/api/signals/recent?limit=15${icpId ? '&icpId=' + encodeURIComponent(icpId) : ''}`;
+
+    let signals = [];
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`server responded ${res.status}`);
+      const data = await res.json();
+      signals = Array.isArray(data.signals) ? data.signals : [];
+    } catch (err) {
+      streamFeed.innerHTML =
+        `<div class="stream-item"><span class="stream-item__icon">⚠️</span>
+           <div class="stream-item__content"><strong>Signal stream unavailable</strong>
+           <p>Backend not reachable — start it with "npm start" in the backend folder.</p></div></div>`;
+      return;
+    }
+
+    if (signals.length === 0) {
+      streamFeed.innerHTML =
+        `<div class="stream-item"><span class="stream-item__icon">📡</span>
+           <div class="stream-item__content"><strong>No signals yet</strong>
+           <p>Run Discover Leads to start collecting buying signals for this ICP.</p></div></div>`;
+      return;
+    }
 
     streamFeed.innerHTML = '';
-    mockEvents.forEach(item => {
+    for (const signal of signals) {
+      const icon = this.SIGNAL_ICONS[signal.signal_type] || '📡';
+      const company = signal.company_name || 'Unknown company';
+      const title = signal.title || `${signal.signal_type} signal`;
+      const scoreNote = signal.total_score != null
+        ? ` · scored ${signal.total_score} (${signal.tier})`
+        : '';
+
       const el = document.createElement('div');
       el.className = 'stream-item';
       el.innerHTML = `
-        <span class="stream-item__icon">${item.icon}</span>
+        <span class="stream-item__icon">${icon}</span>
         <div class="stream-item__content">
-          <strong>${item.title}</strong>
-          <p>${item.desc}</p>
+          <strong></strong>
+          <p></p>
         </div>
-        <span class="stream-item__time">Just now</span>
+        <span class="stream-item__time">${this.formatRelativeTime(signal.detected_at)}</span>
       `;
+      // Signal titles come from scraped pages, so set them as text rather than
+      // HTML to avoid injecting scraped markup into the dashboard.
+      el.querySelector('strong').textContent = `${company}: ${title}`.slice(0, 140);
+      el.querySelector('p').textContent = `via ${signal.source || 'discovery'}${scoreNote}`;
+
+      if (signal.source_url) {
+        el.style.cursor = 'pointer';
+        el.title = signal.source_url;
+        el.addEventListener('click', () => window.open(signal.source_url, '_blank', 'noopener'));
+      }
+
       streamFeed.appendChild(el);
-    });
+    }
+  },
+
+  formatRelativeTime(iso) {
+    if (!iso) return '';
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return '';
+
+    const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (seconds < 60) return 'just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
   },
 
   /**
@@ -196,49 +374,40 @@ const App = {
       // Create loading indicator
       const botMsg = document.createElement('div');
       botMsg.className = 'chat-msg assistant';
-      botMsg.innerHTML = '⚡ <em>Groq AI (Llama-3.3-70B) thinking...</em>';
+      botMsg.textContent = '⚡ Thinking…';
       chatMessages.appendChild(botMsg);
       chatMessages.scrollTop = chatMessages.scrollHeight;
 
-      const groqKey = localStorage.getItem('groq_api_key') || '';
-
-      // Summary of active leads for context
-      const leadsSummary = this.filteredLeads.slice(0, 5).map(l =>
-        `${l.company_name} (${l.company_industry}, ${l.company_size} employees) - ${l.contact_name} (${l.contact_title}) - Score: ${l.total_score}/100 [${l.tier}]`
-      ).join('\n');
-
+      // The request goes to our own backend, which holds the Groq key and
+      // builds the lead context from the database. Calling Groq straight from
+      // the browser required the key in localStorage and is blocked by the
+      // app's Content-Security-Policy.
       try {
-        const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        const res = await fetch(`${this.API_BASE}/api/copilot/chat`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${groqKey}`
-          },
-          body: JSON.stringify({
-            model: 'llama-3.3-70b-versatile',
-            messages: [
-              {
-                role: 'system',
-                content: `You are LeadPulse AI Copilot, an ultra-fast elite sales intelligence assistant. You help sales reps analyze B2B prospects, draft cold outreach emails, recommend deal strategies, and extract buying intent signals.\n\nCurrent Active Target ICP: ${window.ACTIVE_ICP?.name || 'US B2B SaaS Enterprise CTOs'}\nTop Discovered Leads:\n${leadsSummary}`
-              },
-              { role: 'user', content: text }
-            ],
-            temperature: 0.6,
-            max_tokens: 450
-          })
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, icpId: window.ACTIVE_ICP?.id || null })
         });
 
-        const data = await res.json();
-        const aiResponse = data?.choices?.[0]?.message?.content;
+        const data = await res.json().catch(() => ({}));
 
-        if (aiResponse) {
-          botMsg.innerHTML = `⚡ <strong>Groq Copilot (Llama-3.3-70B):</strong><br><br>${aiResponse.replace(/\n/g, '<br>')}`;
-        } else {
-          throw new Error('Groq returned empty response');
+        if (!res.ok) {
+          throw new Error(data.error || `request failed (HTTP ${res.status})`);
         }
+        if (!data.reply) throw new Error('the model returned an empty response');
+
+        this.renderCopilotReply(botMsg, data.reply, data.leadsInContext);
       } catch (err) {
-        console.warn('Groq direct API call notice:', err.message);
-        botMsg.innerHTML = `⚡ <strong>Groq Copilot:</strong><br>Analyzed query against ${this.filteredLeads.length} active leads. Recommended Action: Prioritize your top Hot Leads: <strong>${this.filteredLeads[0]?.company_name || 'TechNova'} (Score ${this.filteredLeads[0]?.total_score || 92})</strong>.`;
+        // Report the real failure. This used to fall back to a canned message
+        // naming an invented company and score, which read as a genuine answer.
+        botMsg.innerHTML = '';
+        const label = document.createElement('strong');
+        label.textContent = 'Copilot unavailable';
+        const detail = document.createElement('p');
+        detail.style.margin = '6px 0 0';
+        detail.textContent = err.message;
+        botMsg.appendChild(label);
+        botMsg.appendChild(detail);
       }
       chatMessages.scrollTop = chatMessages.scrollHeight;
     };
@@ -249,6 +418,57 @@ const App = {
     });
   },
 
+  /**
+   * Render a copilot reply as clean assistant text (never raw HTML from the model).
+   * Skips empty markdown-table leftovers and tightens spacing for readable chat.
+   */
+  renderCopilotReply(container, reply, leadsInContext) {
+    container.innerHTML = '';
+
+    const label = document.createElement('strong');
+    label.textContent = `Sales Copilot${typeof leadsInContext === 'number' ? ` · ${leadsInContext} leads` : ''}`;
+    container.appendChild(label);
+
+    const lines = String(reply || '')
+      .split(/\r?\n/)
+      .map(l => l.trimEnd())
+      .filter(l => {
+        const t = l.trim();
+        if (!t) return true;
+        if (/^\|?\s*-{3,}/.test(t)) return false;
+        if (/^\|(\s*-+\s*\|)+\s*$/.test(t)) return false;
+        if (/^[\s|:-]+$/.test(t)) return false;
+        return true;
+      });
+
+    let blankRun = 0;
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) {
+        blankRun += 1;
+        if (blankRun > 1) continue;
+        continue;
+      }
+      blankRun = 0;
+
+      const p = document.createElement('p');
+      p.style.margin = '8px 0 0';
+      p.style.whiteSpace = 'pre-wrap';
+      p.style.lineHeight = '1.45';
+
+      if (/^\d+\.\s+/.test(t)) {
+        p.style.fontWeight = '600';
+        p.style.marginTop = '12px';
+      } else if (/^(Industry|Location|Buyer|Email|Website|LinkedIn|About|Next)\b/i.test(t) || t.includes(' · ')) {
+        p.style.color = 'var(--text-secondary)';
+        p.style.fontSize = '0.92em';
+      }
+
+      p.textContent = t;
+      container.appendChild(p);
+    }
+  },
+
 
   /**
    * Real-time Multi-Source Discovery Pipeline Execution
@@ -257,36 +477,41 @@ const App = {
     const toast = document.getElementById('discovery-toast');
     const statusText = document.getElementById('discovery-status-text');
     const bar = document.getElementById('discovery-bar');
+    const titleText = toast ? toast.querySelector('strong') : null;
 
     if (!toast) return;
     toast.classList.remove('hidden');
     if (bar) bar.style.width = '5%';
+    if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline... (5%)';
     if (statusText) statusText.textContent = 'Triggering multi-source real-time discovery engine...';
 
-    const groqKey = localStorage.getItem('groq_api_key') || '';
-    const apolloKey = localStorage.getItem('apollo_api_key') || '';
-    const hunterKey = localStorage.getItem('hunter_api_key') || '';
+    // Provider keys are server-side only (backend/.env). They were previously
+    // read from localStorage and sent as X-*-Api-Key headers, which the backend
+    // never read — that only exposed secrets to anything running in the page.
+    const headers = { 'Content-Type': 'application/json' };
 
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Groq-Api-Key': groqKey,
-      'X-Apollo-Api-Key': apolloKey,
-      'X-Hunter-Api-Key': hunterKey
-    };
-
-    const icpId = window.ACTIVE_ICP?.id || 'default';
+    const icpId = window.ACTIVE_ICP?.id;
+    if (!icpId) {
+      this.showDiscoveryConnectionError(toast, statusText, bar, 'no target ICP selected');
+      return;
+    }
 
     try {
       // Call backend discovery execution endpoint
-      const response = await fetch(`http://localhost:3000/api/discovery/run/${icpId}`, {
+      const response = await fetch(`${this.API_BASE}/api/discovery/run/${encodeURIComponent(icpId)}`, {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(window.ACTIVE_ICP || {})
       });
 
       const data = await response.json();
-      if (!response.ok || !data.jobId) {
-        throw new Error(data.error || 'Failed to start discovery job');
+
+      // 409 means a run is already in flight for this ICP; attach to it rather
+      // than reporting an error or starting a second Chromium-backed run.
+      if (response.status === 409 && data.jobId) {
+        if (statusText) statusText.textContent = 'Discovery already running — following the existing run...';
+      } else if (!response.ok || !data.jobId) {
+        throw new Error(data.error || `Failed to start discovery job (HTTP ${response.status})`);
       }
 
       const jobId = data.jobId;
@@ -294,30 +519,47 @@ const App = {
       // Poll real job status
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`http://localhost:3000/api/discovery/status/${jobId}`);
+          const statusRes = await fetch(`${this.API_BASE}/api/discovery/status/${encodeURIComponent(jobId)}`);
           const statusData = await statusRes.json();
 
           if (statusData && statusData.progress !== undefined) {
-            if (bar) bar.style.width = `${Math.max(statusData.progress, 10)}%`;
+            const pct = Math.max(statusData.progress, 0);
+            if (bar) bar.style.width = `${pct}%`;
+            if (titleText) titleText.textContent = `Running Multi-Source AI Pipeline... (${pct}%)`;
             if (statusText && statusData.statusText) statusText.textContent = statusData.statusText;
           }
 
           if (statusData.state === 'completed' || statusData.progress >= 100) {
             clearInterval(pollInterval);
             if (bar) bar.style.width = '100%';
-            if (statusText) statusText.textContent = `Discovery completed! Discovered ${statusData.result?.found || 0} prospects.`;
+            if (titleText) titleText.textContent = 'Discovery completed!';
 
-            // Refresh leads from backend
+            // Refresh leads and the signal stream from the backend
             await this.refreshLeadsFromBackend();
+            await this.refreshRadarStream();
+
+            // Report the real outcome: "completed" with zero leads is a
+            // meaningful result the user needs to see, not a silent success.
+            const found = Array.isArray(this.allLeads) ? this.allLeads.length : 0;
+            if (statusText) {
+              statusText.textContent = found > 0
+                ? `Finished scoring prospects — ${found} lead${found === 1 ? '' : 's'} in your pipeline.`
+                : 'Run finished but no prospects matched. Check the backend logs — a source may be rate-limited or missing credentials.';
+            }
 
             setTimeout(() => {
               toast.classList.add('hidden');
               if (bar) bar.style.width = '0%';
-            }, 1200);
+              if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline...';
+            }, 1500);
           } else if (statusData.state === 'failed') {
             clearInterval(pollInterval);
-            if (statusText) statusText.textContent = `Discovery notice: ${statusData.failedReason || 'Completed with warnings.'}`;
-            setTimeout(() => toast.classList.add('hidden'), 2000);
+            if (titleText) titleText.textContent = 'Discovery failed';
+            if (statusText) statusText.textContent = `Error: ${statusData.failedReason || 'Job execution failed.'}`;
+            setTimeout(() => {
+              toast.classList.add('hidden');
+              if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline...';
+            }, 4000);
           }
         } catch {
           // Keep polling until timeout
@@ -326,14 +568,25 @@ const App = {
 
     } catch (err) {
       console.warn('Real-time API connection notice:', err.message);
-      this.runFallbackDiscoveryAnimation(toast, statusText, bar);
+      this.showDiscoveryConnectionError(toast, statusText, bar, err.message);
     }
   },
 
   async refreshLeadsFromBackend(icpId = null) {
+    const targetIcp = icpId || window.ACTIVE_ICP?.id || null;
+
+    // Always scope to the active ICP. Requesting without a filter returns every
+    // lead from every ICP, which is why switching targets appeared to do
+    // nothing — the same combined list came back each time.
+    if (!targetIcp) {
+      this.allLeads = [];
+      if (window.Filters) Filters.init(this.allLeads);
+      this.applyFilters();
+      return;
+    }
+
     try {
-      const targetIcp = icpId || window.ACTIVE_ICP?.id;
-      const url = `http://localhost:3000/api/leads${targetIcp && targetIcp !== 'default' ? '?icpId=' + targetIcp : ''}`;
+      const url = `${this.API_BASE}/api/leads?icpId=${encodeURIComponent(targetIcp)}&limit=500`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -348,38 +601,38 @@ const App = {
     }
     if (window.Filters) Filters.init(this.allLeads);
     this.applyFilters();
+
+    // Charts are only drawn on tab click, so a refresh while the analytics tab
+    // is open would otherwise leave stale numbers on screen.
+    if (window.Charts && document.getElementById('panel-analytics')?.classList.contains('active')) {
+      Charts.renderAll(this.filteredLeads);
+    }
   },
 
 
 
 
-  runFallbackDiscoveryAnimation(toast, statusText, bar) {
-    const steps = [
-      'Scanning Google & Job Boards for ICP matches...',
-      'Monitoring News & PR RSS feeds for funding signals...',
-      'Extracting Reddit & Social pain-point mentions...',
-      'Deduplicating leads via SHA-256 hashes...',
-      'Computing 5-dimension scores & Groq LLM explanations...'
-    ];
+  /**
+   * Shown when the discovery API can't be reached at all.
+   *
+   * This used to animate a fake 0->100% progress bar with invented status
+   * lines, which made an unreachable backend look like a successful run that
+   * simply found nothing. Report the real problem instead.
+   */
+  showDiscoveryConnectionError(toast, statusText, bar, message) {
+    const titleText = toast ? toast.querySelector('strong') : null;
 
-    let stepIdx = 0;
-    let progress = 0;
+    if (bar) bar.style.width = '0%';
+    if (titleText) titleText.textContent = 'Discovery could not start';
+    if (statusText) {
+      statusText.textContent =
+        `Discovery API not reachable${this.API_BASE ? ` at ${this.API_BASE}` : ''} — check the backend is running. (${message})`;
+    }
 
-    const interval = setInterval(() => {
-      progress += 20;
-      if (bar) bar.style.width = `${progress}%`;
-      if (statusText && steps[stepIdx]) statusText.textContent = steps[stepIdx];
-
-      stepIdx++;
-      if (progress >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
-          toast.classList.add('hidden');
-          if (bar) bar.style.width = '0%';
-          this.applyFilters();
-        }, 600);
-      }
-    }, 400);
+    setTimeout(() => {
+      toast.classList.add('hidden');
+      if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline...';
+    }, 8000);
   },
 
 

@@ -3,11 +3,25 @@ node_modules/
 backend/node_modules/
 frontend/node_modules/
 
-# Environment variables
+# Environment variables — ignore every .env variant, then re-allow the
+# committed template. Backups such as .env.backup-<date> hold real secrets.
 .env
-.env.local
-.env.production
+.env.*
 backend/.env
+backend/.env.*
+!.env.example
+
+# Database — contains scraped lead data and must never be committed
+*.sqlite
+*.sqlite3
+*.db
+backend/database.sqlite
+
+# Backups & local runtime
+*.bak
+backend/database.sqlite.bak*
+backend/logs/
+backend/scrapling/.env.scrapling
 
 # Logs
 logs/
@@ -29,3 +43,8 @@ Thumbs.db
 # Temporary scratch & test files
 scratch/
 tmp/
+
+# Vendored Scrapling clone (large); install locally, do not commit
+backend/scrapling/upstream/
+backend/scrapling/__pycache__/
+backend/scrapling/**/__pycache__/

@@ -1,122 +1,86 @@
 const express = require('express');
-const router = express.Router();
 const Lead = require('../models/Lead');
 const Signal = require('../models/Signal');
-const ScoreHistory = require('../models/ScoreHistory');
-const { PAGINATION } = require('../utils/constants');
-const logger = require('../utils/logger');
+const { query } = require('../config/database');
 
-/**
- * GET /api/leads
- * List leads with filters, sorting, and pagination
- */
+const router = express.Router();
+
+// List all leads with optional icpId filter and pagination
 router.get('/', async (req, res) => {
   try {
-    const {
-      icpId, source, status, tier, search,
-      sortBy = 'discovery_timestamp',
-      sortOrder = 'DESC',
-      page = PAGINATION.DEFAULT_PAGE,
-      limit = PAGINATION.DEFAULT_LIMIT,
-    } = req.query;
+    const { icpId, limit = 100, offset = 0 } = req.query;
 
-    const result = await Lead.list({
-      icpId, source, status, tier, search,
-      sortBy, sortOrder,
-      page: parseInt(page, 10),
-      limit: Math.min(parseInt(limit, 10), PAGINATION.MAX_LIMIT),
-    });
-
-    res.json(result);
+    let leads;
+    if (icpId) {
+      leads = await Lead.listByIcp(icpId, parseInt(limit), parseInt(offset));
+    } else {
+      // Same projection as listByIcp so the UI gets identical fields either way.
+      const result = query(
+        `SELECT l.*, s.total_score, s.tier, s.explanation_text,
+                s.intent_score, s.profile_fit_score, s.company_fit_score,
+                s.recency_score, s.engagement_score
+         FROM leads l
+         LEFT JOIN lead_scores s ON l.id = s.lead_id
+         ORDER BY l.discovery_timestamp DESC LIMIT ? OFFSET ?`,
+        [parseInt(limit), parseInt(offset)]
+      );
+      leads = result.rows;
+    }
+    res.json({ leads });
   } catch (err) {
-    logger.error('Failed to list leads:', err.message);
-    res.status(500).json({ error: 'Failed to list leads' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * GET /api/leads/stats
- * Get lead statistics
- */
+// Get lead statistics
 router.get('/stats', async (req, res) => {
   try {
-    const { icpId } = req.query;
-
-    const tierCounts = await Lead.countByTier(icpId);
-    const sourceCounts = await Lead.countBySource(icpId);
-
-    const totalLeads = Object.values(tierCounts).reduce((a, b) => a + b, 0);
-
-    res.json({
-      total: totalLeads,
-      byTier: tierCounts,
-      bySource: sourceCounts,
-    });
+    const stats = await Lead.getStats();
+    res.json(stats);
   } catch (err) {
-    logger.error('Failed to get lead stats:', err.message);
-    res.status(500).json({ error: 'Failed to get stats' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * GET /api/leads/:id
- * Get a single lead with full details
- */
+// Get lead detail (including signals and score history)
 router.get('/:id', async (req, res) => {
   try {
     const lead = await Lead.findById(req.params.id);
-    if (!lead) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    // Get signals and score history
-    const [signals, scoreHistory] = await Promise.all([
-      Signal.getByLead(lead.id),
-      ScoreHistory.getByLead(lead.id, 30),
-    ]);
+    const scoreResult = query('SELECT * FROM lead_scores WHERE lead_id = ?', [lead.id]);
+    const score = scoreResult.rows[0];
 
-    res.json({
-      ...lead,
-      signals,
-      scoreHistory,
-    });
+    const historyResult = query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at ASC', [lead.id]);
+    const history = historyResult.rows;
+
+    const signals = await Signal.listByLead(lead.id);
+
+    res.json({ lead, score, history, signals });
   } catch (err) {
-    logger.error('Failed to get lead:', err.message);
-    res.status(500).json({ error: 'Failed to get lead' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * PATCH /api/leads/:id
- * Update a lead
- */
+// Update a lead
 router.patch('/:id', async (req, res) => {
   try {
-    const updated = await Lead.update(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-    res.json(updated);
+    const lead = await Lead.update(req.params.id, req.body);
+    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    res.json(lead);
   } catch (err) {
-    logger.error('Failed to update lead:', err.message);
-    res.status(500).json({ error: 'Failed to update lead' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * DELETE /api/leads/:id
- * Delete a lead
- */
+// Delete a lead
 router.delete('/:id', async (req, res) => {
   try {
-    const deleted = await Lead.delete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ error: 'Lead not found' });
-    }
-    res.json({ message: 'Lead deleted successfully' });
+    const success = await Lead.delete(req.params.id);
+    if (!success) return res.status(404).json({ error: 'Lead not found' });
+    res.json({ success: true });
   } catch (err) {
-    logger.error('Failed to delete lead:', err.message);
-    res.status(500).json({ error: 'Failed to delete lead' });
+    res.status(500).json({ error: err.message });
   }
 });
 

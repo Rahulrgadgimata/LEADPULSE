@@ -65,9 +65,10 @@ const Filters = {
    */
   buildSourceFilters(leads) {
     const sourceLabels = {
-      web_scrape: 'Web Scrape',
+      web_scrape: 'Web',
+      linkedin: 'LinkedIn',
       news: 'News',
-      job_board: 'Job Board',
+      job_board: 'Jobs',
       social: 'Social',
       enrichment: 'Enrichment',
     };

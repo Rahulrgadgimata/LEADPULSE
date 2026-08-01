@@ -1,99 +1,59 @@
 const express = require('express');
-const router = express.Router();
 const ICP = require('../models/ICP');
-const logger = require('../utils/logger');
 
-/**
- * POST /api/icp
- * Create a new ICP
- */
-router.post('/', async (req, res) => {
-  try {
-    const {
-      name, description, industries, company_size_min,
-      company_size_max, geographies, job_titles, keywords,
-    } = req.body;
+const router = express.Router();
 
-    if (!name) {
-      return res.status(400).json({ error: 'ICP name is required' });
-    }
-
-    const icp = await ICP.create({
-      user_id: req.user?.id || '00000000-0000-0000-0000-000000000000',
-      name, description, industries, company_size_min,
-      company_size_max, geographies, job_titles, keywords,
-    });
-
-    res.status(201).json(icp);
-  } catch (err) {
-    logger.error('Failed to create ICP:', err.message);
-    res.status(500).json({ error: 'Failed to create ICP' });
-  }
-});
-
-/**
- * GET /api/icp
- * List all ICPs
- */
+// GET all ICPs for current user
 router.get('/', async (req, res) => {
   try {
-    const userId = req.user?.id || '00000000-0000-0000-0000-000000000000';
-    const icps = await ICP.listByUser(userId);
-    res.json({ icps });
+    const icps = await ICP.listAll();
+    res.json(icps);
   } catch (err) {
-    logger.error('Failed to list ICPs:', err.message);
-    res.status(500).json({ error: 'Failed to list ICPs' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * GET /api/icp/:id
- * Get a single ICP
- */
+// GET single ICP
 router.get('/:id', async (req, res) => {
   try {
-    const icp = await ICP.findById(req.params.id);
-    if (!icp) {
-      return res.status(404).json({ error: 'ICP not found' });
-    }
+    const icp = await ICP.getById(req.params.id);
+    if (!icp) return res.status(404).json({ error: 'ICP not found' });
     res.json(icp);
   } catch (err) {
-    logger.error('Failed to get ICP:', err.message);
-    res.status(500).json({ error: 'Failed to get ICP' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * PUT /api/icp/:id
- * Update an ICP
- */
+// POST new ICP
+router.post('/', async (req, res) => {
+  try {
+    const icpData = { ...req.body, user_id: req.user ? req.user.id : null };
+    const icp = await ICP.create(icpData);
+    res.status(201).json(icp);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT update ICP
 router.put('/:id', async (req, res) => {
   try {
-    const updated = await ICP.update(req.params.id, req.body);
-    if (!updated) {
-      return res.status(404).json({ error: 'ICP not found' });
-    }
-    res.json(updated);
+    const icp = await ICP.update(req.params.id, req.body);
+    if (!icp) return res.status(404).json({ error: 'ICP not found' });
+    res.json(icp);
   } catch (err) {
-    logger.error('Failed to update ICP:', err.message);
-    res.status(500).json({ error: 'Failed to update ICP' });
+    res.status(500).json({ error: err.message });
   }
 });
 
-/**
- * DELETE /api/icp/:id
- * Delete an ICP
- */
+// DELETE ICP
 router.delete('/:id', async (req, res) => {
   try {
-    const deleted = await ICP.delete(req.params.id);
-    if (!deleted) {
-      return res.status(404).json({ error: 'ICP not found' });
-    }
-    res.json({ message: 'ICP deleted successfully' });
+    const success = await ICP.delete(req.params.id);
+    if (!success) return res.status(404).json({ error: 'ICP not found' });
+    res.json({ success: true });
   } catch (err) {
-    logger.error('Failed to delete ICP:', err.message);
-    res.status(500).json({ error: 'Failed to delete ICP' });
+    res.status(500).json({ error: err.message });
   }
 });
 

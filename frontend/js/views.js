@@ -82,7 +82,7 @@ const Views = {
           <div class="lead-card-new__top">
             <div>
               <div class="lead-card-new__company">${this.escapeHtml(lead.company_name)}</div>
-              <div class="lead-card-new__industry">${this.escapeHtml(lead.company_industry || 'SaaS')} · ${lead.company_size || '—'} employees</div>
+              <div class="lead-card-new__industry">${this.escapeHtml(lead.company_industry || 'Industry unknown')}${lead.company_size ? ` · ${lead.company_size} employees` : ''}</div>
             </div>
             <div class="score-badge-ring score-badge-ring--${tier}">
               ${totalScore}
@@ -90,8 +90,9 @@ const Views = {
           </div>
 
           <div class="lead-card-new__contact">
-            <div class="contact-name">${this.escapeHtml(lead.contact_name || 'Decision Maker')}</div>
-            <div class="contact-title">${this.escapeHtml(lead.contact_title || '—')}</div>
+            <div class="contact-name">${lead.contact_name ? this.escapeHtml(lead.contact_name) : '<em style="opacity:.5">No contact found</em>'}</div>
+            <div class="contact-title">${this.escapeHtml(lead.contact_title || '')}</div>
+            ${lead.contact_linkedin ? `<div style="margin-top:6px;font-size:0.75rem;"><a href="${this.escapeHtml(lead.contact_linkedin)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);font-weight:600;">LinkedIn profile →</a></div>` : ''}
           </div>
 
           <div class="lead-card-new__signals">
@@ -100,7 +101,7 @@ const Views = {
         </div>
 
         <div class="lead-card-new__bottom">
-          <span>📍 ${this.escapeHtml(lead.company_location || 'US')}</span>
+          <span>📍 ${this.escapeHtml(lead.company_location || 'Location unknown')}</span>
           <span class="badge badge--${tier === 'hot' ? 'success' : 'warning'}">${sourceLabel.toUpperCase()}</span>
         </div>
       `;
@@ -230,7 +231,7 @@ const Views = {
         <span style="color:var(--text-tertiary);font-size:0.8rem;">✉️ ${this.escapeHtml(lead.contact_email || 'Verified via Apollo')}</span>
       </div>
 
-      <button class="btn btn--primary" style="width:100%;" onclick="Modal.openLeadDrawer(window.App.allLeads.find(l=>l.id==='${lead.id}') || window.DEMO_LEADS.find(l=>l.id==='${lead.id}'))">Open Full Inspection Drawer</button>
+      <button class="btn btn--primary" style="width:100%;" onclick="Modal.openLeadDrawer(window.App.allLeads.find(l=>l.id==='${lead.id}'))">Open Full Inspection Drawer</button>
     `;
   },
 
@@ -250,11 +251,11 @@ const Views = {
   },
 
   getSourceLabel(src) {
-    return { web_scrape: 'Web Scrape', news: 'News Mention', job_board: 'Job Posting', social: 'Social Signals', enrichment: 'Apollo' }[src] || src;
+    return { web_scrape: 'Web', linkedin: 'LinkedIn', news: 'News', job_board: 'Jobs', social: 'Social', enrichment: 'Apollo' }[src] || src;
   },
 
   getSignalIcon(type) {
-    return { news_mention: '📰', job_posting: '💼', social_post: '💬', web_mention: '🌐', funding: '💰' }[type] || '📌';
+    return { news_mention: '📰', job_posting: '💼', social_post: '💬', web_mention: '🌐', linkedin: '🔗', funding: '💰' }[type] || '📌';
   },
 
   escapeHtml(str) {

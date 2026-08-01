@@ -7,11 +7,14 @@
     <meta name="description" content="Next-generation AI outbound sales platform. Autonomous lead discovery, 5-dimension scoring, and Groq LLM intelligence.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Chart.js is vendored locally: the CDN copy was blocked by this app's
+         Content-Security-Policy, and a self-hosted copy also removes a runtime
+         dependency on a third-party CDN. -->
+    <script src="vendor/chart.umd.min.js"></script>
     <link rel="stylesheet" href="css/styles.css">
 </head>
-<body class="dark-theme">
+<body class="light-theme">
     <!-- ═══ Top Command Bar Header ═══ -->
     <header class="header" id="header">
         <div class="header__left">
@@ -21,26 +24,25 @@
                     <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
                         <rect width="34" height="34" rx="10" fill="url(#brandGrad)"/>
                         <path d="M11 23V11l6-4 6 4v12l-6 4-6-4z" stroke="#fff" stroke-width="2" fill="none"/>
-                        <circle cx="17" cy="17" r="3.5" fill="#06b6d4"/>
+                        <circle cx="17" cy="17" r="3.5" fill="#0d9488"/>
                         <path d="M17 13.5v-3M17 20.5v3M13.5 17h-3M20.5 17h3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
                         <defs>
                             <linearGradient id="brandGrad" x1="0" y1="0" x2="34" y2="34">
-                                <stop stop-color="#06b6d4"/>
-                                <stop offset="0.5" stop-color="#3b82f6"/>
-                                <stop offset="1" stop-color="#8b5cf6"/>
+                                <stop stop-color="#0d9488"/>
+                                <stop offset="1" stop-color="#0284c7"/>
                             </linearGradient>
                         </defs>
                     </svg>
                 </div>
                 <div class="brand__info">
                     <span class="brand__name">LEADPULSE <span class="brand__badge">AI OS</span></span>
-                    <span class="brand__status"><span class="status-dot"></span> Groq Llama-3 Active</span>
+                    <span class="brand__status"><span class="status-dot"></span> <span id="engine-status-label">Connecting…</span></span>
                 </div>
             </div>
 
             <!-- Active ICP Selector -->
             <div class="icp-selector" id="icp-selector">
-                <span class="icp-selector__label">TARGET ICP:</span>
+                <span class="icp-selector__label">FINDING:</span>
                 <button class="icp-selector__btn" id="btn-icp-select">
                     <span class="icp-selector__name" id="current-icp-name">US B2B SaaS Enterprise CTOs</span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
@@ -64,7 +66,7 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
                 </svg>
-                <span>Run Discovery Pipeline</span>
+                <span>Find Leads</span>
             </button>
 
             <button class="icon-btn" id="btn-settings" title="Engine Settings">
@@ -90,10 +92,10 @@
                 <span class="metric-card__value" id="stat-total-count">0</span>
                 <div class="metric-card__trend positive">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
-                    <span>+24% this week</span>
+                    <span id="leads-trend"></span>
                 </div>
             </div>
-            <div class="metric-card__footer">Deduplicated across 5 public channels</div>
+            <div class="metric-card__footer" id="dedup-footer">Deduplicated across all discovery channels</div>
         </div>
 
         <div class="metric-card metric-card--hot" id="metric-hot">
@@ -145,7 +147,7 @@
                     <span>5-Dimension AI Score</span>
                 </div>
             </div>
-            <div class="metric-card__footer">Powered by Groq Llama-3 scoring</div>
+            <div class="metric-card__footer" id="scoring-engine-label">5-dimension weighted scoring</div>
         </div>
     </div>
 
@@ -216,11 +218,11 @@
             <div class="filter-block">
                 <label class="filter-block__label">DISCOVERY CHANNEL</label>
                 <div class="chip-group" id="filter-sources">
-                    <button class="chip" data-group="source" data-value="web_scrape">🌐 Web Scrape</button>
-                    <button class="chip" data-group="source" data-value="news">📰 News Mention</button>
-                    <button class="chip" data-group="source" data-value="job_board">💼 Job Posting</button>
-                    <button class="chip" data-group="source" data-value="social">💬 Social Post</button>
-                    <button class="chip" data-group="source" data-value="enrichment">🔍 Enrichment</button>
+                    <button class="chip" data-group="source" data-value="web_scrape">Web</button>
+                    <button class="chip" data-group="source" data-value="linkedin">LinkedIn</button>
+                    <button class="chip" data-group="source" data-value="news">News</button>
+                    <button class="chip" data-group="source" data-value="job_board">Jobs</button>
+                    <button class="chip" data-group="source" data-value="social">Social</button>
                 </div>
             </div>
 
@@ -295,47 +297,55 @@
                     </div>
 
                     <div class="sources-card">
-                        <h3>Scraper Channel Coverage</h3>
+                        <h3>Discovery channels</h3>
                         <div class="channel-list">
                             <div class="channel-item">
                                 <span class="channel-item__icon">🌐</span>
                                 <div class="channel-item__info">
-                                    <strong>Google & B2B Web Scraper</strong>
-                                    <span>Puppeteer headful browser engine</span>
+                                    <strong>Google + Brave + DuckDuckGo</strong>
+                                    <span>Public web search merged for ICP matches</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">🔗</span>
+                                <div class="channel-item__info">
+                                    <strong>LinkedIn Companies</strong>
+                                    <span>Public company pages &amp; firmographics</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">👤</span>
+                                <div class="channel-item__info">
+                                    <strong>LinkedIn Buyers</strong>
+                                    <span>Public decision-maker titles matching ICP</span>
                                 </div>
                                 <span class="badge badge--success">ACTIVE</span>
                             </div>
                             <div class="channel-item">
                                 <span class="channel-item__icon">📰</span>
                                 <div class="channel-item__info">
-                                    <strong>News & PR Monitor</strong>
-                                    <span>RSS + NewsAPI feeds (Funding, Mergers)</span>
+                                    <strong>News &amp; PR</strong>
+                                    <span>Funding, hiring, expansion coverage</span>
                                 </div>
                                 <span class="badge badge--success">ACTIVE</span>
                             </div>
                             <div class="channel-item">
                                 <span class="channel-item__icon">💼</span>
                                 <div class="channel-item__info">
-                                    <strong>Job Posting Signals</strong>
-                                    <span>Indeed, LinkedIn Jobs, Greenhouse</span>
+                                    <strong>Job Postings</strong>
+                                    <span>Hiring signals from public boards</span>
                                 </div>
                                 <span class="badge badge--success">ACTIVE</span>
                             </div>
                             <div class="channel-item">
                                 <span class="channel-item__icon">💬</span>
                                 <div class="channel-item__info">
-                                    <strong>Reddit & Social Intent</strong>
-                                    <span>r/SaaS, r/DevOps, HackerNews monitoring</span>
+                                    <strong>Social Intent</strong>
+                                    <span>X / Reddit when API keys are set</span>
                                 </div>
                                 <span class="badge badge--success">ACTIVE</span>
-                            </div>
-                            <div class="channel-item">
-                                <span class="channel-item__icon">🔍</span>
-                                <div class="channel-item__info">
-                                    <strong>Apollo & Hunter API Engine</strong>
-                                    <span>Email verification & B2B enrichment</span>
-                                </div>
-                                <span class="badge badge--warning">CONFIGURED</span>
                             </div>
                         </div>
                     </div>
@@ -369,17 +379,17 @@
                     <div class="copilot-header">
                         <div class="copilot-avatar">⚡</div>
                         <div>
-                            <h3>Groq Llama-3 Sales Copilot</h3>
+                            <h3 id="copilot-title">AI Sales Copilot</h3>
                             <p>Ask AI to query leads, summarize intent signals, or draft hyper-personalized outreach emails.</p>
                         </div>
                     </div>
                     <div class="chat-messages" id="chat-messages">
                         <div class="chat-msg assistant">
-                            Hello! I am your LeadPulse AI Copilot powered by Groq Llama-3. I've analyzed your current 55 prospects. How can I help you target your highest-converting leads today?
+                            <span id="copilot-greeting">Ask about your pipeline — I answer from the leads currently loaded for your active ICP.</span>
                         </div>
                     </div>
                     <div class="chat-input-bar">
-                        <input type="text" class="chat-input" id="chat-input" placeholder="Ask e.g. 'Which leads have recent hiring signals?' or 'Draft an email for Sarah Chen at TechNova'...">
+                        <input type="text" class="chat-input" id="chat-input" placeholder="Ask e.g. 'Which leads have the strongest buying signals?' or 'Draft an outreach email for my top lead'...">
                         <button class="btn btn--primary" id="btn-send-chat">Send</button>
                     </div>
                 </div>
@@ -404,24 +414,20 @@
             </div>
             <div class="modal__body">
                 <div class="config-section">
-                    <h3>⚡ Groq API Key (Primary AI Engine)</h3>
-                    <p class="config-desc">Powers ultra-fast Llama-3 score explanations & copilot assistant.</p>
-                    <input type="password" class="config-input" id="input-groq-key" placeholder="gsk_...">
-                    <button class="btn btn--primary" id="btn-save-groq">Save Groq Key</button>
-                    <div class="status-indicator" id="groq-status">⚪ Not set (using rule-based fallback)</div>
+                    <h3>⚡ AI Engine</h3>
+                    <div class="status-indicator" id="groq-status">Checking integration status…</div>
                 </div>
 
                 <div class="config-section">
-                    <h3>🔍 Apollo.io API Key (Contact Enrichment)</h3>
-                    <input type="password" class="config-input" id="input-apollo-key" placeholder="Enter Apollo API Key...">
+                    <h3>🔌 Integrations</h3>
+                    <p class="config-desc">
+                        API keys are configured on the server in <code>backend/.env</code> — never in the
+                        browser. Edit that file and restart the server to change them.
+                    </p>
+                    <div id="provider-status-list"></div>
                 </div>
 
-                <div class="config-section">
-                    <h3>📧 Hunter.io API Key (Email Discovery)</h3>
-                    <input type="password" class="config-input" id="input-hunter-key" placeholder="Enter Hunter API Key...">
-                </div>
-
-                <button class="btn btn--accent" id="btn-save-all-settings" style="width:100%;margin-top:12px;">Save & Close</button>
+                <button class="btn btn--accent" id="btn-save-all-settings" style="width:100%;margin-top:12px;">Close</button>
             </div>
         </div>
     </div>
@@ -430,79 +436,84 @@
     <div class="modal-overlay hidden" id="icp-modal-overlay">
         <div class="modal modal--icp" id="icp-modal">
             <div class="modal__header">
-                <h2 class="modal__title">🎯 Ideal Customer Profile (ICP) Manager</h2>
+                <h2 class="modal__title">Who do you want to find?</h2>
                 <button class="modal__close" id="icp-modal-close">&times;</button>
             </div>
             <div class="modal__body">
-                <!-- Preset Templates Bar -->
+                <p class="icp-intro">Tell us your ideal customer in plain language. Discovery will search the web, LinkedIn, news, and jobs for matching companies.</p>
+
+                <div class="icp-presets icp-presets--saved">
+                    <label class="form-label" for="icp-saved-select">Saved profile</label>
+                    <div class="icp-presets__list" style="flex:1;display:flex;gap:8px;align-items:center;">
+                        <select class="config-input" id="icp-saved-select" style="flex:1;margin-bottom:0;">
+                            <option value="">+ Create new profile</option>
+                        </select>
+                        <button class="btn btn--secondary" id="btn-icp-delete" type="button" title="Delete the selected ICP">Delete</button>
+                    </div>
+                </div>
+
                 <div class="icp-presets">
-                    <span class="icp-presets__label">Quick Presets:</span>
+                    <span class="icp-presets__label">Or start from a template</span>
                     <div class="icp-presets__list">
-                        <button class="icp-preset-btn active" data-preset="saas">US B2B SaaS Enterprise CTOs</button>
-                        <button class="icp-preset-btn" data-preset="fintech">Fintech Infrastructure VPs</button>
-                        <button class="icp-preset-btn" data-preset="aiml">AI/ML Startup Founders</button>
-                        <button class="icp-preset-btn" data-preset="health">Healthcare IT Directors</button>
+                        <button class="icp-preset-btn" data-preset="saas" type="button">B2B SaaS CTOs</button>
+                        <button class="icp-preset-btn" data-preset="fintech" type="button">Fintech VPs</button>
+                        <button class="icp-preset-btn" data-preset="aiml" type="button">AI Startup Founders</button>
+                        <button class="icp-preset-btn" data-preset="health" type="button">Healthcare IT</button>
                     </div>
                 </div>
 
                 <form id="icp-form" onsubmit="event.preventDefault();">
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-name">ICP Name <span class="required">*</span></label>
-                            <input type="text" class="config-input" id="icp-form-name" placeholder="e.g. US B2B SaaS Enterprise CTOs" required>
-                        </div>
-                        <div class="form-group flex-2">
-                            <label class="form-label" for="icp-form-desc">Description</label>
-                            <input type="text" class="config-input" id="icp-form-desc" placeholder="High-growth SaaS companies seeking DevOps scaling">
+                            <label class="form-label" for="icp-form-name">Profile name <span class="required">*</span></label>
+                            <input type="text" class="config-input" id="icp-form-name" placeholder="e.g. Mid-market SaaS in the US" required>
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-industries">Target Industries <span class="form-hint">(comma-separated)</span></label>
-                            <input type="text" class="config-input" id="icp-form-industries" placeholder="B2B SaaS, Cloud Computing, DevOps, CyberSecurity">
+                            <label class="form-label" for="icp-form-industries">Industry</label>
+                            <input type="text" class="config-input" id="icp-form-industries" placeholder="SaaS, Fintech, Healthcare…">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-geos">Location</label>
+                            <input type="text" class="config-input" id="icp-form-geos" placeholder="United States, India, UK…">
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-size-min">Min Employees</label>
-                            <input type="number" class="config-input" id="icp-form-size-min" value="50" min="1">
+                            <label class="form-label" for="icp-form-size-range">Company size</label>
+                            <select class="config-input" id="icp-form-size-range">
+                                <option value="1-50">Startup (1–50)</option>
+                                <option value="50-200">SMB (50–200)</option>
+                                <option value="50-1000" selected>Mid-market (50–1,000)</option>
+                                <option value="200-5000">Growth (200–5,000)</option>
+                                <option value="1000-50000">Enterprise (1,000+)</option>
+                                <option value="1-100000">Any size</option>
+                            </select>
+                            <input type="hidden" id="icp-form-size-min" value="50">
+                            <input type="hidden" id="icp-form-size-max" value="1000">
                         </div>
                         <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-size-max">Max Employees</label>
-                            <input type="number" class="config-input" id="icp-form-size-max" value="5000" min="1">
-                        </div>
-                        <div class="form-group flex-2">
-                            <label class="form-label" for="icp-form-geos">Target Geographies <span class="form-hint">(comma-separated)</span></label>
-                            <input type="text" class="config-input" id="icp-form-geos" placeholder="United States, Canada, United Kingdom">
+                            <label class="form-label" for="icp-form-titles">Buyer titles</label>
+                            <input type="text" class="config-input" id="icp-form-titles" placeholder="CTO, VP Engineering, Founder…">
                         </div>
                     </div>
 
                     <div class="form-row">
                         <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-titles">Target Job Titles <span class="form-hint">(comma-separated)</span></label>
-                            <input type="text" class="config-input" id="icp-form-titles" placeholder="CTO, VP of Engineering, Director of Infrastructure, DevOps Lead">
+                            <label class="form-label" for="icp-form-keywords">What are they buying / hiring for?</label>
+                            <input type="text" class="config-input" id="icp-form-keywords" placeholder="cloud cost, devops, AI, payments…">
                         </div>
                     </div>
 
-                    <div class="form-row">
-                        <div class="form-group flex-1">
-                            <label class="form-label" for="icp-form-keywords">Buying Intent Keywords <span class="form-hint">(comma-separated)</span></label>
-                            <input type="text" class="config-input" id="icp-form-keywords" placeholder="kubernetes, cloud cost, hiring devops, ci/cd pipeline, observability">
-                        </div>
-                    </div>
-
-                    <div class="form-row align-center" style="margin-top:12px;">
-                        <label class="checkbox-label">
-                            <input type="checkbox" id="icp-form-active" checked>
-                            <span>Set as Active Discovery ICP Target</span>
-                        </label>
-                    </div>
+                    <input type="hidden" id="icp-form-desc" value="">
+                    <input type="hidden" id="icp-form-active" value="1">
 
                     <div class="modal__actions" style="margin-top:20px;display:flex;gap:12px;">
-                        <button class="btn btn--primary" id="btn-save-icp" style="flex:2;">🎯 Save & Activate ICP Target</button>
-                        <button class="btn btn--secondary" id="btn-cancel-icp" style="flex:1;">Cancel</button>
+                        <button class="btn btn--primary" id="btn-save-icp" type="button" style="flex:2;">Save &amp; find leads</button>
+                        <button class="btn btn--secondary" id="btn-cancel-icp" type="button" style="flex:1;">Cancel</button>
                     </div>
                 </form>
             </div>
@@ -514,7 +525,7 @@
         <div class="discovery-toast__spinner"></div>
         <div class="discovery-toast__text">
             <strong>Running Multi-Source AI Pipeline...</strong>
-            <span id="discovery-status-text">Scanning Google, News & Job Boards...</span>
+            <span id="discovery-status-text">Scanning web, LinkedIn, news &amp; jobs...</span>
         </div>
         <div class="discovery-toast__progress">
             <div class="discovery-toast__bar" id="discovery-bar"></div>
@@ -522,7 +533,7 @@
     </div>
 
     <!-- External Libraries & Scripts -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/config.js"></script>
     <script src="js/data.js"></script>
     <script src="js/animations.js"></script>
     <script src="js/filters.js"></script>

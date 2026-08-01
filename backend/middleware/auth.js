@@ -1,43 +1,41 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config/env');
+const logger = require('../utils/logger');
 
 /**
- * JWT authentication middleware
+ * Middleware to protect routes with JWT.
  */
-const authenticate = (req, res, next) => {
+function auth(req, res, next) {
   const authHeader = req.headers.authorization;
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
+    return res.status(401).json({ error: 'Unauthorized: No token provided' });
   }
 
   const token = authHeader.split(' ')[1];
-
   try {
-    const decoded = jwt.verify(token, config.jwt.secret);
-    req.user = decoded;
+    const decoded = jwt.verify(token, config.JWT_SECRET);
+    req.user = decoded; // { id, email }
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Invalid or expired token.' });
+    logger.warn(`JWT verification failed: ${err.message}`);
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
-};
+}
 
 /**
- * Optional auth — passes through if no token, but attaches user if present
+ * Optional Auth - allows public access but decodes user if token exists.
  */
-const optionalAuth = (req, res, next) => {
+function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
-
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.split(' ')[1];
     try {
-      req.user = jwt.verify(token, config.jwt.secret);
-    } catch {
-      // Token invalid, continue without user
+      req.user = jwt.verify(token, config.JWT_SECRET);
+    } catch (err) {
+      // ignore
     }
   }
-
   next();
-};
+}
 
-module.exports = { authenticate, optionalAuth };
+module.exports = { auth, optionalAuth };
