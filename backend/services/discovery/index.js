@@ -272,13 +272,13 @@ class DiscoveryService {
    * Sweep every stalled job, regardless of ICP. Used by the jobs listing so it
    * cannot show a run as 'running' when nothing is executing it.
    */
-  static sweepStalledJobs() {
+  static sweepStalledJobs(force = false) {
     const running = query(
       `SELECT id, started_at, last_progress_at FROM discovery_jobs WHERE status = 'running'`
     ).rows;
     let swept = 0;
     for (const job of running) {
-      if (this._isStalled(job)) { this._failStalled(job); swept++; }
+      if (force || this._isStalled(job)) { this._failStalled(job); swept++; }
     }
     return swept;
   }

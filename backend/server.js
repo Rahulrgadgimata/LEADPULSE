@@ -18,7 +18,7 @@ require('./config/database');
 // process exited is dead. Reconcile immediately rather than leaving rows that
 // report 'running' and block new runs.
 {
-  const swept = require('./services/discovery').sweepStalledJobs();
+  const swept = require('./services/discovery').sweepStalledJobs(true);
   if (swept > 0) logger.warn(`Reconciled ${swept} discovery job(s) orphaned by a previous shutdown.`);
 }
 
