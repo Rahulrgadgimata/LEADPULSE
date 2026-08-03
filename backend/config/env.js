@@ -135,8 +135,8 @@ module.exports = {
   // "Top N companies in <city>" pages found during search are opened and mined
   // for the companies they link to — roughly 20-40 in-niche companies per page
   // against about one per ordinary search result.
-  DISCOVERY_DIRECTORY_PAGES: parseInt(process.env.DISCOVERY_DIRECTORY_PAGES) || 14,
-  DISCOVERY_DIRECTORY_LINKS: parseInt(process.env.DISCOVERY_DIRECTORY_LINKS) || 40,
+  DISCOVERY_DIRECTORY_PAGES: parseInt(process.env.DISCOVERY_DIRECTORY_PAGES) || 2,
+  DISCOVERY_DIRECTORY_LINKS: parseInt(process.env.DISCOVERY_DIRECTORY_LINKS) || 10,
   // Pause before retrying a blocked query. The block is usually a short
   // throttle, so one backoff recovers most of them.
   SEARCH_BLOCK_BACKOFF_MS: parseInt(process.env.SEARCH_BLOCK_BACKOFF_MS) || 6000,
@@ -151,20 +151,20 @@ module.exports = {
   // pace for several minutes on a free tier) but short enough that a run killed
   // by a restart does not leave the UI polling a frozen progress bar.
   DISCOVERY_STALE_JOB_MINUTES: parseInt(process.env.DISCOVERY_STALE_JOB_MINUTES) || 10,
-  DISCOVERY_TARGET_LEADS: parseInt(process.env.DISCOVERY_TARGET_LEADS) || 150,
-  DISCOVERY_MAX_QUERIES: parseInt(process.env.DISCOVERY_MAX_QUERIES) || 60,
+  DISCOVERY_TARGET_LEADS: parseInt(process.env.DISCOVERY_TARGET_LEADS) || 10,
+  DISCOVERY_MAX_QUERIES: parseInt(process.env.DISCOVERY_MAX_QUERIES) || 6,
   // Parallel homepage fetches while profiling candidate domains.
-  SCRAPER_CONCURRENCY: parseInt(process.env.SCRAPER_CONCURRENCY) || 8,
-  SCRAPER_PAGE_TIMEOUT_MS: parseInt(process.env.SCRAPER_PAGE_TIMEOUT_MS) || 8000,
+  SCRAPER_CONCURRENCY: parseInt(process.env.SCRAPER_CONCURRENCY) || 4,
+  SCRAPER_PAGE_TIMEOUT_MS: parseInt(process.env.SCRAPER_PAGE_TIMEOUT_MS) || 6000,
   // Parallel enrich+score workers. Bounded to stay inside Hunter/Apollo limits.
   ENRICHMENT_CONCURRENCY: parseInt(process.env.ENRICHMENT_CONCURRENCY) || 4,
 
   // LinkedIn public company-page discovery (via search-engine index + soft OG fetch).
-  LINKEDIN_TARGET_LEADS: parseInt(process.env.LINKEDIN_TARGET_LEADS) || 80,
-  LINKEDIN_MAX_QUERIES: parseInt(process.env.LINKEDIN_MAX_QUERIES) || 24,
+  LINKEDIN_TARGET_LEADS: parseInt(process.env.LINKEDIN_TARGET_LEADS) || 5,
+  LINKEDIN_MAX_QUERIES: parseInt(process.env.LINKEDIN_MAX_QUERIES) || 4,
   // Public LinkedIn people/buyer discovery (title + company from search snippets).
-  BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 40,
-  BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 16,
+  BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 5,
+  BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 3,
 
   // Intake quality: only prospects with website or LinkedIn company page enter.
   LEAD_QUALITY_MIN_SCORE: parseInt(process.env.LEAD_QUALITY_MIN_SCORE) || 52,
