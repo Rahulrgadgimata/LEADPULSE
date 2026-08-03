@@ -108,7 +108,7 @@ class Lead {
   static async getStats() {
     const total = query('SELECT COUNT(*) as count FROM leads').rows[0].count;
     const byTier = query('SELECT tier, COUNT(*) as count FROM lead_scores GROUP BY tier').rows;
-    const recent = query('SELECT COUNT(*) as count FROM leads WHERE created_at >= datetime("now", "-7 days")').rows[0].count;
+    const recent = query(`SELECT COUNT(*) as count FROM leads WHERE created_at >= datetime('now', '-7 days')`).rows[0].count;
     return { total, byTier, recent };
   }
 }
