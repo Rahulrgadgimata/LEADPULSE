@@ -15,10 +15,12 @@ const scrapling = require('../../scraplingClient');
 let lastRequestAt = 0;
 let browserPromise = null;
 
-async function throttle() {
+async function throttle(overrideDelayMs = null) {
   const now = Date.now();
   // Google needs more spacing than DDG/Brave.
-  const delay = Math.max(config.SCRAPER_DELAY_MS, 3500);
+  const delay = overrideDelayMs != null
+    ? overrideDelayMs
+    : Math.max(config.SCRAPER_DELAY_MS, 3500);
   const scheduled = Math.max(now, lastRequestAt + delay);
   lastRequestAt = scheduled;
   const wait = scheduled - now;
@@ -106,19 +108,36 @@ class GoogleScrape {
   static lastRequestWasBlocked = false;
 
   static async search(searchQuery, limit = 10) {
-    await throttle();
+    // LinkedIn SERPs need more spacing — Google throttles bursts hard.
+    const linkedIn = /linkedin\.com/i.test(searchQuery);
+    await throttle(linkedIn ? Math.max(config.SCRAPER_DELAY_MS, 6000) : null);
 
     // Scrapling first — TLS impersonation / stealth beats bare axios on Google.
     try {
       const via = await scrapling.search(searchQuery, 'google', limit);
       if (via.ok && via.results.length > 0) {
         GoogleScrape.lastRequestWasBlocked = false;
-        logger.debug(`Google Scrapling "${searchQuery}" -> ${via.results.length} (${via.mode})`);
+        logger.info(`Google Scrapling "${searchQuery}" -> ${via.results.length} (${via.mode})`);
         return via.results;
       }
       if (via.blocked) GoogleScrape.lastRequestWasBlocked = true;
     } catch (err) {
       logger.debug(`Google Scrapling failed (${err.message}); falling back`);
+    }
+
+    // For LinkedIn queries, skip Puppeteer fallback — it almost always hits
+    // the same consent/captcha wall and burns 20s+ per query.
+    if (linkedIn) {
+      try {
+        const httpResults = await this._httpSearch(searchQuery, limit);
+        if (httpResults.length > 0) {
+          GoogleScrape.lastRequestWasBlocked = false;
+          return httpResults;
+        }
+      } catch (err) {
+        GoogleScrape.lastRequestWasBlocked = true;
+      }
+      return [];
     }
 
     try {

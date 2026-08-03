@@ -203,7 +203,30 @@ const App = {
 
     this.filteredLeads = leads;
     this.updateMetrics(leads);
+    this.updateChannelMix(leads);
     Views.render(leads);
+  },
+
+  updateChannelMix(leads) {
+    const el = document.getElementById('channel-mix');
+    if (!el) return;
+    const labels = {
+      web_scrape: 'Web',
+      news: 'News',
+      job_board: 'Jobs',
+      linkedin: 'LinkedIn',
+      social: 'Social',
+    };
+    const counts = {};
+    for (const lead of leads) {
+      const key = lead.source || 'other';
+      counts[key] = (counts[key] || 0) + 1;
+    }
+    const parts = Object.keys(labels).map(key => {
+      const n = counts[key] || 0;
+      return `<span class="channel-mix__item"><strong>${n}</strong>${labels[key]}</span>`;
+    });
+    el.innerHTML = parts.join('');
   },
 
   updateMetrics(leads) {

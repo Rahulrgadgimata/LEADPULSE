@@ -485,6 +485,22 @@ body::before {
 .badge { font-size: 0.65rem; padding: 2px 8px; border-radius: 4px; font-weight: 700; }
 .badge--success { background: rgba(16, 185, 129, 0.15); color: var(--emerald); }
 .badge--warning { background: rgba(245, 158, 11, 0.15); color: var(--amber); }
+.badge--web { background: rgba(2, 132, 199, 0.12); color: #0284c7; }
+.badge--linkedin { background: rgba(10, 102, 194, 0.12); color: #0a66c2; }
+.badge--news { background: rgba(217, 119, 6, 0.12); color: #d97706; }
+.badge--jobs { background: rgba(5, 150, 105, 0.12); color: #059669; }
+.badge--social { background: rgba(99, 102, 241, 0.12); color: #6366f1; }
+
+.channel-mix {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 0 0 14px; font-size: 0.78rem; color: var(--text-secondary);
+}
+.channel-mix__item {
+  background: #fff; border: 1px solid var(--border-glass);
+  border-radius: var(--radius-full); padding: 4px 10px;
+  font-weight: 600;
+}
+.channel-mix__item strong { color: var(--text-primary); margin-right: 4px; }
 
 /* ─── Analytics ─────────────────────────────────────── */
 .analytics-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }

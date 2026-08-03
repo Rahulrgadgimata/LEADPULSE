@@ -4,7 +4,7 @@ const logger = require('../../../utils/logger');
 const config = require('../../../config/env');
 const Search = require('./search');
 const { isNonProspect, isMegaCorp } = require('./domainFilter');
-const { mapWithConcurrency } = require('../../../utils/concurrency');
+const { collectWithConcurrency } = require('../../../utils/concurrency');
 
 /**
  * Discovers companies from publicly indexed LinkedIn company pages.
@@ -43,7 +43,16 @@ class LinkedInCollector {
       for (const result of results) {
         const parsed = this._parseSearchResult(result);
         if (!parsed) continue;
-        if (!bySlug.has(parsed.slug)) bySlug.set(parsed.slug, parsed);
+        const existing = bySlug.get(parsed.slug);
+        if (!existing) {
+          bySlug.set(parsed.slug, parsed);
+        } else if (
+          (/^read more$/i.test(existing.company_name) || existing.company_name.length < 3) &&
+          parsed.company_name &&
+          !/^read more$/i.test(parsed.company_name)
+        ) {
+          bySlug.set(parsed.slug, parsed);
+        }
       }
 
       if (onProgress) {
@@ -62,10 +71,11 @@ class LinkedInCollector {
 
     if (onProgress) onProgress({ phase: 'enriching', candidates: candidates.length });
 
-    // Soft-fetch public OG metadata + resolve official websites in parallel.
-    const enriched = await mapWithConcurrency(
+    // Soft-fetch is slow and LinkedIn login-walls most pages; OG tags are a
+    // bonus. Prefer keeping search-snippet leads even when the page fetch fails.
+    const enriched = await collectWithConcurrency(
       candidates,
-      config.SCRAPER_CONCURRENCY,
+      Math.min(3, config.SCRAPER_CONCURRENCY || 3),
       candidate => this._enrichCandidate(candidate)
     );
 
@@ -143,35 +153,37 @@ class LinkedInCollector {
       queries.push(q);
     };
 
-    const li = 'linkedin.com/company';
+    const li = 'linkedin.com/company/';
 
     // Prefer startups / SMBs — national "AI company" queries surface giants.
+    // Trailing slash + keyword order matters: Google ranks real /company/ pages;
+    // bare "linkedin.com/company Artificial Intelligence" mostly returns login hubs.
     for (const industry of industries) {
-      add(li, industry, 'startup', geo);
-      add(li, industry, 'SME', geo);
+      add(industry, 'startup', geo, li);
+      add(industry, 'SME', geo, li);
       for (const keyword of keywords.slice(0, 4)) {
-        add(li, industry, keyword, 'startup', geo);
+        add(industry, keyword, 'startup', geo, li);
       }
     }
 
     for (const keyword of keywords) {
-      add(li, keyword, 'startup', geo);
-      add(li, keyword, 'scaleup', geo);
+      add(keyword, 'startup', geo, li);
+      add(keyword, 'scaleup', geo, li);
     }
 
     for (const title of jobTitles.slice(0, 3)) {
-      add(li, industries[0] || keywords[0], 'startup', title, geo);
+      add(industries[0] || keywords[0], 'startup', title, geo, li);
     }
 
     for (const extraGeo of geographies.slice(0, 3)) {
       for (const industry of industries.slice(0, 2)) {
-        add(li, industry, 'startup', extraGeo);
+        add(industry, 'startup', extraGeo, li);
       }
     }
 
     for (const industry of industries.slice(0, 2)) {
-      add(li, industry, 'hiring', 'startup', geo);
-      add(li, industry, 'seed', 'startup', geo);
+      add(industry, 'hiring', 'startup', geo, li);
+      add(industry, 'seed', 'startup', geo, li);
     }
 
     return queries.slice(0, maxQueries);
@@ -186,6 +198,7 @@ class LinkedInCollector {
     let url;
     try {
       url = new URL(result.url);
+      url.hash = '';
     } catch (e) {
       return null;
     }
@@ -201,6 +214,8 @@ class LinkedInCollector {
 
     const slug = decodeURIComponent(match[1]).toLowerCase().replace(/\/+$/, '');
     if (!slug || slug === 'showcase') return null;
+    // Skip LinkedIn's own page and government portals that dominate broad queries.
+    if (/^(linkedin|startup-india|indiaai)$/i.test(slug)) return null;
 
     const linkedinUrl = `https://www.linkedin.com/company/${slug}`;
     const companyName = this._nameFromTitle(result.title, slug);
@@ -246,7 +261,10 @@ class LinkedInCollector {
     }
 
     // Drop junk titles that are clearly not company names.
-    if (!name || /^(home|search|feed|login|sign in)$/i.test(name)) return null;
+    if (!name || /^(home|search|feed|login|sign in|read more|overview|about)$/i.test(name)) return null;
+    // Strip marketing taglines: "StartupMandi AI - Transforming Businesses With AI"
+    name = name.split(/\s+[-–—|]\s+/)[0].trim();
+    if (!name || name.length < 2) return null;
     return name.slice(0, 120);
   }
 
@@ -328,11 +346,8 @@ class LinkedInCollector {
       logger.debug(`LinkedIn page fetch soft-failed for ${candidate.slug}: ${err.message}`);
     }
 
-    // Resolve an official domain so Apollo/Hunter enrichment can run later.
-    if (!enriched.company_website) {
-      enriched.company_website = await this._resolveWebsite(enriched.company_name, enriched.slug);
-    }
-
+    // Do not burn search quota resolving websites here — company LinkedIn URL
+    // is enough for LeadQuality intake; enrichment fills domains later.
     return enriched;
   }
 

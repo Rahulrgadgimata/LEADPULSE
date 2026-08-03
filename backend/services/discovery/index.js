@@ -98,7 +98,9 @@ class DiscoveryService {
       // ── Collect ───────────────────────────────────────────────────────────
       // Every source runs; LeadQuality then keeps only convertible prospects
       // so Groq / enrichment work on the best pool — not junk volume.
-      const collectors = [
+      // LinkedIn company + buyer run sequentially — both depend on Google and
+      // parallel bursts trip rate limits that wipe LinkedIn volume to zero.
+      const webAndOther = [
         {
           name: 'WebScraper',
           run: () => WebScraper.searchCompanies(icp, {
@@ -118,31 +120,50 @@ class DiscoveryService {
             }
           })
         },
-        {
-          name: 'LinkedInCollector',
-          run: () => LinkedInCollector.searchLinkedIn(icp, {
-            onProgress: ({ phase, queriesRun, totalQueries, candidates, leads }) => {
-              if (phase === 'search' && totalQueries) {
-                const pct = 27 + Math.round((queriesRun / totalQueries) * 5);
-                updateProgress(pct, `LinkedIn companies (${queriesRun}/${totalQueries}, ${candidates} found)...`);
-              } else if (phase === 'enriching') {
-                updateProgress(33, `Enriching ${candidates} LinkedIn company pages...`);
-              } else if (phase === 'done') {
-                updateProgress(35, `LinkedIn companies: ${leads} best matches...`);
-              }
-            }
-          })
-        },
-        {
-          name: 'BuyerCollector',
-          run: () => BuyerCollector.searchBuyers(icp)
-        },
         { name: 'NewsMonitor', run: () => NewsMonitor.searchNews(icp) },
         { name: 'JobScraper', run: () => JobScraper.searchJobs(icp) },
         { name: 'SocialCollector', run: () => SocialCollector.searchSocial(icp) }
       ];
 
-      const settled = await Promise.allSettled(collectors.map(c => c.run()));
+      const settledOther = await Promise.allSettled(webAndOther.map(c => c.run()));
+
+      updateProgress(30, 'Searching LinkedIn company pages...');
+      let linkedInCompanies = [];
+      try {
+        linkedInCompanies = await LinkedInCollector.searchLinkedIn(icp, {
+          onProgress: ({ phase, queriesRun, totalQueries, candidates, leads }) => {
+            if (phase === 'search' && totalQueries) {
+              const pct = 30 + Math.round((queriesRun / totalQueries) * 5);
+              updateProgress(pct, `LinkedIn companies (${queriesRun}/${totalQueries}, ${candidates} found)...`);
+            } else if (phase === 'enriching') {
+              updateProgress(36, `Enriching ${candidates} LinkedIn company pages...`);
+            } else if (phase === 'done') {
+              updateProgress(38, `LinkedIn companies: ${leads} best matches...`);
+            }
+          }
+        });
+      } catch (err) {
+        logger.error(`Collector LinkedInCollector failed: ${err.message}`);
+      }
+
+      updateProgress(39, 'Searching LinkedIn buyers...');
+      let linkedInBuyers = [];
+      try {
+        linkedInBuyers = await BuyerCollector.searchBuyers(icp);
+      } catch (err) {
+        logger.error(`Collector BuyerCollector failed: ${err.message}`);
+      }
+
+      const collectors = webAndOther;
+      const settled = [
+        ...settledOther,
+        { status: 'fulfilled', value: linkedInCompanies },
+        { status: 'fulfilled', value: linkedInBuyers }
+      ];
+      collectors.push(
+        { name: 'LinkedInCollector', run: async () => linkedInCompanies },
+        { name: 'BuyerCollector', run: async () => linkedInBuyers }
+      );
 
       const rawDiscovered = [];
       const perSource = {};

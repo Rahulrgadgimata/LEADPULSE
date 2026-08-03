@@ -86,6 +86,12 @@ function isCleanName(name) {
     return false;
   }
   if (/\b(top \d+|best \d+|list of|how to)\b/i.test(name)) return false;
+  // LinkedIn job headlines / sitelink junk mistakenly saved as company names.
+  if (/^(read more|see more|overview|about us)$/i.test(name)) return false;
+  if (/\b(engineer|developer|student|intern|freelancer|innovator|entrepreneur|specialist|analyst)\b/i.test(name)
+      && !/\b(labs?|systems?|technologies|solutions|software|media|inc|llc|ltd|corp|company|studio|group)\b/i.test(name)) {
+    return false;
+  }
   return true;
 }
 

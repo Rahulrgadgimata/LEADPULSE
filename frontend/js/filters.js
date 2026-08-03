@@ -76,12 +76,21 @@ const Filters = {
     if (!container) return;
     container.innerHTML = '';
 
+    // Always show every discovery channel with live counts so Web/News/Jobs
+    // are never "invisible" just because LinkedIn junk ranked higher.
     Object.entries(sourceLabels).forEach(([key, label]) => {
-      const count = leads.filter(l => l.source === key).length;
-      if (count > 0) {
-        const chip = this.createChip(`${label} (${count})`, 'source', key);
-        container.appendChild(chip);
+      if (key === 'enrichment' || key === 'social') {
+        const count = leads.filter(l => l.source === key).length;
+        if (count === 0) return;
       }
+      const count = leads.filter(l => l.source === key).length;
+      const chip = this.createChip(`${label} (${count})`, 'source', key);
+      if (count === 0) {
+        chip.disabled = true;
+        chip.style.opacity = '0.45';
+        chip.title = 'No leads from this channel yet — run Find Leads';
+      }
+      container.appendChild(chip);
     });
   },
 

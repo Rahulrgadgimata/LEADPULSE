@@ -128,6 +128,13 @@ class Search {
     if (abortedForRun) return [];
 
     const perSource = Math.min(Math.max(limit, 10), 20);
+    const linkedInQuery = /linkedin\.com/i.test(query);
+
+    // LinkedIn pages are almost only useful from Google (or Serper). Bing/Brave
+    // for these queries return login hubs, job boards, or unrelated AI cert pages.
+    if (linkedInQuery) {
+      return this._runLinkedInSearch(query, limit, perSource);
+    }
 
     const sources = [
       {
@@ -171,6 +178,30 @@ class Search {
       });
     }
 
+    return this._mergeSources(query, limit, perSource, sources);
+  }
+
+  /**
+   * LinkedIn discovery path — Google (and Serper if keyed) only.
+   */
+  static async _runLinkedInSearch(query, limit, perSource) {
+    const sources = [];
+    if (config.SERPER_API_KEY) {
+      sources.push({
+        name: 'serper-google',
+        run: () => serperSearch(query, perSource),
+        wasBlocked: () => false
+      });
+    }
+    sources.push({
+      name: 'google-scrape',
+      run: () => GoogleScrape.search(query, perSource),
+      wasBlocked: () => GoogleScrape.lastRequestWasBlocked
+    });
+    return this._mergeSources(query, limit, perSource, sources);
+  }
+
+  static async _mergeSources(query, limit, perSource, sources) {
     // A resting source is neither run nor counted against the abort threshold:
     // it is known-throttled, not evidence that this query found nothing.
     const active = sources.filter(s => !isResting(s.name));

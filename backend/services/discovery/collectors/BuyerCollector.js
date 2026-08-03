@@ -37,16 +37,10 @@ class BuyerCollector {
       }
     }
 
-    // Resolve company websites for the strongest candidates.
+    // Resolve websites only for a small subset — person LinkedIn is enough
+    // for intake; burning search on every candidate starves Google LinkedIn queries.
     const candidates = [...byKey.values()].slice(0, Math.ceil(target * 1.3));
-    const withSites = [];
-    for (const c of candidates) {
-      if (!c.company_website) {
-        c.company_website = await this._resolveWebsite(c.company_name);
-      }
-      withSites.push(c);
-      if (withSites.length >= target) break;
-    }
+    const withSites = candidates.slice(0, target);
 
     const best = LeadQuality.filterBest(withSites);
     logger.info(`BuyerCollector produced ${best.length} convertible buyer leads (from ${queriesRun} queries)`);
@@ -70,16 +64,17 @@ class BuyerCollector {
       queries.push(q);
     };
 
-    const li = 'linkedin.com/in';
+    const li = 'linkedin.com/in/';
     for (const title of titles.slice(0, 4)) {
       for (const industry of industries.slice(0, 3)) {
-        add(li, title, industry, 'startup', geo);
-        add(li, title, industry, 'SME', geo);
+        add(title, industry, 'startup', geo, li);
+        add(`"${title} at"`, industry, geo, li);
+        add(title, industry, 'SME', geo, li);
       }
       for (const keyword of keywords.slice(0, 3)) {
-        add(li, title, keyword, 'startup', geo);
+        add(title, keyword, 'startup', geo, li);
       }
-      add(li, title, industries[0] || keywords[0], 'startup', geo);
+      add(title, industries[0] || keywords[0], 'startup', geo, li);
     }
 
     return queries.slice(0, maxQueries);
@@ -108,6 +103,7 @@ class BuyerCollector {
     const snippet = String(result.snippet || '');
 
     // Patterns: "Jane Doe - CTO at Acme" / "Jane Doe | CTO | Acme"
+    // Also: "Jane Doe - CTO at Acme · LinkedIn" already stripped above.
     let contactName = null;
     let contactTitle = null;
     let companyName = null;
@@ -125,11 +121,25 @@ class BuyerCollector {
         companyName = parts[2];
       } else if (parts.length === 2) {
         contactName = parts[0];
-        // Snippet often has "Title at Company"
-        const snipAt = snippet.match(/([A-Za-z][A-Za-z0-9 &'/.-]{2,40})\s+at\s+([A-Za-z0-9][A-Za-z0-9 &'.,-]{1,60})/i);
-        if (snipAt) {
-          contactTitle = snipAt[1].trim();
-          companyName = snipAt[2].trim();
+        contactTitle = parts[1];
+      } else if (parts.length === 1) {
+        contactName = parts[0];
+      }
+    }
+
+    // Snippet often has the real company even when the title is messy:
+    // "CTO at Acme · Bengaluru · Experience: ..."
+    if (!companyName || looksLikeJobHeadline(companyName)) {
+      const snipAt = snippet.match(
+        /\b((?:CEO|CTO|CFO|COO|Founder|Co-Founder|VP|Vice President|Head of [A-Za-z &/]+|Director|Chief [A-Za-z ]+))\s+at\s+([A-Za-z0-9][A-Za-z0-9 &'.,-]{1,60})/i
+      );
+      if (snipAt) {
+        contactTitle = contactTitle || snipAt[1].trim();
+        companyName = snipAt[2].trim();
+      } else {
+        const looseAt = snippet.match(/\bat\s+([A-Za-z0-9][A-Za-z0-9 &'.,-]{1,50})(?:\s*[·•|]|\s+in\s|\s*$)/i);
+        if (looseAt && !looksLikeJobHeadline(looseAt[1])) {
+          companyName = looseAt[1].trim();
         }
       }
     }
@@ -138,8 +148,17 @@ class BuyerCollector {
     companyName = companyName
       .replace(/\s*\b(inc|llc|ltd|corp)\.?$/i, '')
       .replace(/\s+on LinkedIn.*$/i, '')
+      .replace(/\s*[·•|].*$/, '')
       .trim();
 
+    if (contactName && /^(read more|see more|linkedin)$/i.test(contactName)) {
+      contactName = null;
+    }
+
+    // Job headlines often land in the "company" slot ("AI & Data Science Engineer").
+    if (looksLikeJobHeadline(companyName) || !isPlausibleCompanyName(companyName)) return null;
+    // Don't treat the person's own name as the company.
+    if (contactName && companyName.toLowerCase() === contactName.toLowerCase()) return null;
     if (isMegaCorp(companyName)) return null;
 
     const icpTitles = parseList(icp.job_titles).map(t => String(t).toLowerCase());
@@ -224,6 +243,26 @@ function sharesToken(a, b) {
   const tok = s => String(s).toLowerCase().split(/[^a-z0-9]+/).filter(t => t.length > 2 && !stop.has(t));
   const left = new Set(tok(a));
   return tok(b).some(t => left.has(t));
+}
+
+function looksLikeJobHeadline(value) {
+  const s = String(value || '').trim();
+  if (!s) return false;
+  if (/\b(engineer|developer|student|intern|freelancer|consultant|specialist|analyst|manager|entrepreneur|innovator)\b/i.test(s)
+      && !/\b(labs?|systems?|technologies|solutions|software|media|inc|llc|ltd|corp|company|studio|group)\b/i.test(s)) {
+    return true;
+  }
+  if (/^(founder|ceo|cto|cfo|coo|vp|director|head of)\b/i.test(s)) return true;
+  if (/\b(looking for|open to|hiring)\b/i.test(s)) return true;
+  return false;
+}
+
+function isPlausibleCompanyName(name) {
+  if (name.length < 2 || name.length > 60) return false;
+  // Person-style "First Last" alone is not a company.
+  if (/^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name) && name.split(/\s+/).length === 2) return false;
+  if (/\b(linkedin|profile|resume|cv)\b/i.test(name)) return false;
+  return true;
 }
 
 module.exports = BuyerCollector;

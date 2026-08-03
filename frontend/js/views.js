@@ -102,7 +102,7 @@ const Views = {
 
         <div class="lead-card-new__bottom">
           <span>📍 ${this.escapeHtml(lead.company_location || 'Location unknown')}</span>
-          <span class="badge badge--${tier === 'hot' ? 'success' : 'warning'}">${sourceLabel.toUpperCase()}</span>
+          <span class="badge ${this.getSourceBadgeClass(lead.source)}">${sourceLabel.toUpperCase()}</span>
         </div>
       `;
 
@@ -252,6 +252,16 @@ const Views = {
 
   getSourceLabel(src) {
     return { web_scrape: 'Web', linkedin: 'LinkedIn', news: 'News', job_board: 'Jobs', social: 'Social', enrichment: 'Apollo' }[src] || src;
+  },
+
+  getSourceBadgeClass(src) {
+    return {
+      web_scrape: 'badge--web',
+      linkedin: 'badge--linkedin',
+      news: 'badge--news',
+      job_board: 'badge--jobs',
+      social: 'badge--social',
+    }[src] || 'badge--warning';
   },
 
   getSignalIcon(type) {
