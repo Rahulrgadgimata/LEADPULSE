@@ -8,6 +8,10 @@ const Views = {
   sortColumn: 'total_score',
   sortDirection: 'desc',
 
+  // Clicking any of these inside a card or row means "do this thing", not
+  // "open this lead". Kept in one place so the grid and the table agree.
+  INTERACTIVE_SELECTOR: '.lead-select, .review-actions, .review-btn, a, button, input, label',
+
   /**
    * Render the current active view mode with provided leads
    */
@@ -69,9 +73,10 @@ const Views = {
     leads.forEach(lead => {
       const tier = lead.tier || (lead.total_score >= 70 ? 'hot' : lead.total_score >= 40 ? 'warm' : 'cold');
       const totalScore = lead.total_score ?? 75;
+      const status = Review.statusOf(lead);
 
       const card = document.createElement('div');
-      card.className = `lead-card-new lead-card-new--${tier}`;
+      card.className = `lead-card-new lead-card-new--${tier} lead-card-new--review-${status}`;
       card.dataset.leadId = lead.id;
 
       const signals = (lead.signals || []).slice(0, 3);
@@ -79,6 +84,12 @@ const Views = {
 
       card.innerHTML = `
         <div>
+          <div class="lead-card-new__select">
+            <input type="checkbox" class="lead-select" data-lead-id="${this.escapeHtml(lead.id)}"
+                   ${Review.isSelected(lead.id) ? 'checked' : ''} title="Select for a bulk action">
+            ${Review.badgeHtml(lead)}
+          </div>
+
           <div class="lead-card-new__top">
             <div>
               <div class="lead-card-new__company">${this.escapeHtml(lead.company_name)}</div>
@@ -92,7 +103,7 @@ const Views = {
           <div class="lead-card-new__contact">
             <div class="contact-name">${lead.contact_name ? this.escapeHtml(lead.contact_name) : '<em style="opacity:.5">No contact found</em>'}</div>
             <div class="contact-title">${this.escapeHtml(lead.contact_title || '')}</div>
-            ${lead.contact_linkedin ? `<div style="margin-top:6px;font-size:0.75rem;"><a href="${this.escapeHtml(lead.contact_linkedin)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:var(--cyan);font-weight:600;">LinkedIn profile →</a></div>` : ''}
+            ${lead.contact_linkedin ? `<div style="margin-top:6px;font-size:0.75rem;"><a href="${this.escapeHtml(lead.contact_linkedin)}" target="_blank" rel="noopener" style="color:var(--cyan);font-weight:600;">LinkedIn profile →</a></div>` : ''}
           </div>
 
           <div class="lead-card-new__signals">
@@ -100,15 +111,26 @@ const Views = {
           </div>
         </div>
 
+        ${Review.actionsHtml(lead.id, lead)}
+
         <div class="lead-card-new__bottom">
           <span>📍 ${this.escapeHtml(lead.company_location || 'Location unknown')}</span>
           <span class="badge ${this.getSourceBadgeClass(lead.source)}">${sourceLabel.toUpperCase()}</span>
         </div>
       `;
 
-      card.addEventListener('click', () => Modal.openLeadDrawer(lead));
+      // The controls inside the card are not "open this lead". Checked here
+      // rather than with an inline onclick="event.stopPropagation()", which the
+      // app's own Content-Security-Policy (script-src-attr 'none') refuses to
+      // run — so every review click was also opening the drawer.
+      card.addEventListener('click', (e) => {
+        if (e.target.closest(this.INTERACTIVE_SELECTOR)) return;
+        Modal.openLeadDrawer(lead);
+      });
       container.appendChild(card);
     });
+
+    Review.bindDelegatedActions(container);
   },
 
   /**
@@ -123,12 +145,19 @@ const Views = {
       const totalScore = lead.total_score ?? 75;
 
       const tr = document.createElement('tr');
-      tr.addEventListener('click', () => Modal.openLeadDrawer(lead));
+      tr.addEventListener('click', (e) => {
+        if (e.target.closest(this.INTERACTIVE_SELECTOR)) return;
+        Modal.openLeadDrawer(lead);
+      });
 
       tr.innerHTML = `
+        <td>
+          <input type="checkbox" class="lead-select" data-lead-id="${this.escapeHtml(lead.id)}"
+                 ${Review.isSelected(lead.id) ? 'checked' : ''}>
+        </td>
         <td><strong>#${idx + 1}</strong></td>
         <td>
-          <strong style="color:#fff;">${this.escapeHtml(lead.company_name)}</strong><br>
+          <strong>${this.escapeHtml(lead.company_name)}</strong><br>
           <span style="font-size:0.75rem;color:var(--text-tertiary);">${this.escapeHtml(lead.company_location || '—')}</span>
         </td>
         <td>
@@ -140,18 +169,14 @@ const Views = {
         </td>
         <td><span class="badge badge--${tier === 'hot' ? 'success' : 'warning'}">${tier.toUpperCase()}</span></td>
         <td><span style="font-size:0.78rem;color:var(--text-secondary);">${this.getSourceLabel(lead.source)}</span></td>
-        <td>
-          <div style="display:flex;gap:4px;">
-            ${(lead.signals || []).slice(0, 2).map(s => `<span class="signal-pill">${this.getSignalIcon(s.type)}</span>`).join('')}
-          </div>
-        </td>
-        <td>
-          <button class="btn btn--secondary" style="padding:4px 10px;font-size:0.75rem;">Inspect</button>
-        </td>
+        <td>${Review.badgeHtml(lead)}</td>
+        <td>${Review.actionsHtml(lead.id, lead, 'xs')}</td>
       `;
 
       tbody.appendChild(tr);
     });
+
+    Review.bindDelegatedActions(tbody);
   },
 
   /**
@@ -231,8 +256,16 @@ const Views = {
         <span style="color:var(--text-tertiary);font-size:0.8rem;">✉️ ${this.escapeHtml(lead.contact_email || 'Verified via Apollo')}</span>
       </div>
 
-      <button class="btn btn--primary" style="width:100%;" onclick="Modal.openLeadDrawer(window.App.allLeads.find(l=>l.id==='${lead.id}'))">Open Full Inspection Drawer</button>
+      <div class="drawer-review" style="margin:0 0 14px;">${Review.actionsHtml(lead.id, lead)}</div>
+      <button class="btn btn--primary" id="split-open-drawer" style="width:100%;">Open Full Inspection Drawer</button>
     `;
+
+    // Bound as a listener, not an inline onclick — the app's CSP sets
+    // script-src-attr 'none', so an inline handler here silently never fires.
+    container.querySelector('#split-open-drawer')?.addEventListener('click', () => {
+      Modal.openLeadDrawer((window.App?.allLeads || []).find(l => l.id === lead.id) || lead);
+    });
+    Review.bindDelegatedActions(container);
   },
 
   renderProgressBar(label, score) {

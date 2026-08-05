@@ -167,6 +167,11 @@
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
                 <span>Scoring Analytics</span>
             </button>
+            <button class="nav-tab" data-tab="outreach" id="tab-outreach">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><polyline points="4 6 12 13 20 6"/></svg>
+                <span>Outreach</span>
+                <span class="nav-tab__pill" id="outreach-tab-count" hidden>0</span>
+            </button>
             <button class="nav-tab" data-tab="ai-assistant" id="tab-ai-assistant">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
                 <span>Groq AI Copilot</span>
@@ -187,11 +192,33 @@
                 </button>
             </div>
 
+            <!-- Add a lead the AI did not find -->
+            <button class="btn btn--secondary" id="btn-add-lead" title="Add a lead you found yourself">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Add lead</span>
+            </button>
+
             <!-- Export Button -->
             <button class="btn btn--secondary" id="btn-export">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 <span>Export CSV</span>
             </button>
+        </div>
+    </div>
+
+    <!-- ═══ Bulk Action Bar — appears once leads are selected ═══ -->
+    <div class="bulk-bar hidden" id="bulk-bar">
+        <div class="bulk-bar__count">
+            <strong id="bulk-count">0</strong> selected
+        </div>
+        <div class="bulk-bar__actions">
+            <button class="btn btn--accept" data-bulk="accepted">✓ Accept</button>
+            <button class="btn btn--hold" data-bulk="hold">⏸ Hold</button>
+            <button class="btn btn--reject" data-bulk="rejected">✕ Reject</button>
+            <span class="bulk-bar__divider"></span>
+            <button class="btn btn--secondary" id="btn-bulk-select-hot">Select all Hot</button>
+            <button class="btn btn--secondary" id="btn-bulk-select-all">Select all shown</button>
+            <button class="btn btn--secondary" id="btn-bulk-clear">Clear</button>
         </div>
     </div>
 
@@ -204,6 +231,12 @@
                 <button class="filter-sidebar__reset" id="btn-clear-filters">Reset All</button>
             </div>
 
+            <!-- Review Queue — the decision the dashboard exists to capture -->
+            <div class="filter-block">
+                <label class="filter-block__label">REVIEW QUEUE</label>
+                <div class="chip-group" id="filter-review"></div>
+            </div>
+
             <!-- Tier Filter -->
             <div class="filter-block">
                 <label class="filter-block__label">LEAD TIER</label>
@@ -211,6 +244,16 @@
                     <button class="chip chip--hot" data-group="tier" data-value="hot">🔥 Hot (70-100)</button>
                     <button class="chip chip--warm" data-group="tier" data-value="warm">🌤️ Warm (40-69)</button>
                     <button class="chip chip--cold" data-group="tier" data-value="cold">❄️ Cold (0-39)</button>
+                </div>
+            </div>
+
+            <!-- Date Discovered -->
+            <div class="filter-block">
+                <label class="filter-block__label">DATE DISCOVERED</label>
+                <div class="chip-group" id="filter-dates">
+                    <button class="chip" data-group="date" data-value="1">Today</button>
+                    <button class="chip" data-group="date" data-value="7">Last 7 days</button>
+                    <button class="chip" data-group="date" data-value="30">Last 30 days</button>
                 </div>
             </div>
 
@@ -230,6 +273,12 @@
             <div class="filter-block">
                 <label class="filter-block__label">INDUSTRY</label>
                 <div class="chip-group" id="filter-industries"></div>
+            </div>
+
+            <!-- Geography Filter — built from the countries actually in the data -->
+            <div class="filter-block">
+                <label class="filter-block__label">GEOGRAPHY</label>
+                <div class="chip-group" id="filter-geos"></div>
             </div>
 
             <!-- Company Size Filter -->
@@ -260,14 +309,15 @@
                         <table class="leads-table" id="leads-table">
                             <thead>
                                 <tr>
+                                    <th style="width:32px;"><input type="checkbox" id="table-select-all" title="Select every lead shown"></th>
                                     <th>RANK</th>
                                     <th class="sortable" data-sort="company_name">COMPANY</th>
                                     <th class="sortable" data-sort="contact_name">DECISION MAKER</th>
                                     <th class="sortable" data-sort="total_score">AI MATCH SCORE</th>
                                     <th class="sortable" data-sort="tier">TIER</th>
                                     <th class="sortable" data-sort="source">CHANNEL</th>
-                                    <th>INTENT SIGNALS</th>
-                                    <th>ACTION</th>
+                                    <th>REVIEW</th>
+                                    <th>DECISION</th>
                                 </tr>
                             </thead>
                             <tbody id="leads-table-body"></tbody>
@@ -374,7 +424,78 @@
                 </div>
             </div>
 
-            <!-- TAB 4: Groq AI Copilot -->
+            <!-- TAB 4: AI Outreach & Message Engine -->
+            <div class="tab-panel" id="panel-outreach">
+                <div class="outreach-header">
+                    <div class="outreach-engine" id="outreach-engine-line">Checking the message engine…</div>
+                    <div class="outreach-subtabs" id="outreach-subtabs">
+                        <button class="outreach-subtab active" data-sub="queue">Ready to contact</button>
+                        <button class="outreach-subtab" data-sub="drafts">Drafts &amp; scheduled</button>
+                        <button class="outreach-subtab" data-sub="sent">Sent log</button>
+                        <button class="outreach-subtab" data-sub="templates">Templates</button>
+                        <button class="outreach-subtab" data-sub="optout">Opt-outs</button>
+                    </div>
+                </div>
+
+                <!-- Accepted leads waiting for a first message -->
+                <div class="outreach-pane" id="outreach-pane-queue">
+                    <p class="outreach-hint">
+                        Leads you accepted in the review dashboard. Generate a first-touch message,
+                        edit it, then send or schedule — nothing is ever sent without your review.
+                    </p>
+                    <div id="outreach-queue-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Drafts and scheduled -->
+                <div class="outreach-pane hidden" id="outreach-pane-drafts">
+                    <div class="outreach-toolbar">
+                        <button class="btn btn--primary" id="btn-send-selected-drafts">Send selected</button>
+                        <span class="outreach-hint" id="drafts-hint"></span>
+                    </div>
+                    <div id="outreach-drafts-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Sent log -->
+                <div class="outreach-pane hidden" id="outreach-pane-sent">
+                    <p class="outreach-hint">Every message that left the building — what was sent, to whom, and when.</p>
+                    <div id="outreach-sent-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Templates -->
+                <div class="outreach-pane hidden" id="outreach-pane-templates">
+                    <p class="outreach-hint">
+                        Save a draft that worked and reuse it. Placeholders are re-filled per lead:
+                        <code id="template-placeholder-help"></code>
+                    </p>
+                    <div id="outreach-templates-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Opt-outs -->
+                <div class="outreach-pane hidden" id="outreach-pane-optout">
+                    <div class="optout-grid">
+                        <div class="optout-card">
+                            <h3>Scan a reply for opt-out</h3>
+                            <p class="outreach-hint">
+                                Paste a reply. Clear opt-out language suppresses the sender and cancels
+                                their queued messages. Ambiguous wording is flagged for you to decide.
+                            </p>
+                            <textarea class="config-input" id="reply-scan-text" rows="7" placeholder="Paste the full reply, including headers…"></textarea>
+                            <button class="btn btn--primary" id="btn-scan-reply" style="width:100%;margin-top:8px;">Scan reply</button>
+                            <div id="reply-scan-result" class="scan-result"></div>
+                        </div>
+                        <div class="optout-card">
+                            <h3>Do-not-contact list</h3>
+                            <div class="suppress-add">
+                                <input type="text" class="config-input" id="suppress-email" placeholder="email@company.com or a whole domain">
+                                <button class="btn btn--secondary" id="btn-add-suppression">Block</button>
+                            </div>
+                            <div id="suppression-list" class="outreach-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 5: Groq AI Copilot -->
             <div class="tab-panel" id="panel-ai-assistant">
                 <div class="copilot-card">
                     <div class="copilot-header">
@@ -521,6 +642,161 @@
         </div>
     </div>
 
+    <!-- ═══ Manual Lead Entry Modal ═══ -->
+    <div class="modal-overlay hidden" id="manual-lead-overlay">
+        <div class="modal modal--icp" id="manual-lead-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Add a lead you found yourself</h2>
+                <button class="modal__close" id="manual-lead-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <p class="icp-intro">
+                    For prospects that came from outside the AI pipeline — a referral, a conference,
+                    a list you already had. It goes straight into your accepted leads.
+                </p>
+                <form id="manual-lead-form" onsubmit="event.preventDefault();">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-company">Company <span class="required">*</span></label>
+                            <input type="text" class="config-input" id="ml-company" required placeholder="Acme Inc">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-website">Website</label>
+                            <input type="text" class="config-input" id="ml-website" placeholder="acme.com">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-contact">Contact name</label>
+                            <input type="text" class="config-input" id="ml-contact" placeholder="Jane Doe">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-title">Job title</label>
+                            <input type="text" class="config-input" id="ml-title" placeholder="VP Engineering">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-email">Email</label>
+                            <input type="email" class="config-input" id="ml-email" placeholder="jane@acme.com">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-linkedin">LinkedIn</label>
+                            <input type="text" class="config-input" id="ml-linkedin" placeholder="linkedin.com/in/…">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-industry">Industry</label>
+                            <input type="text" class="config-input" id="ml-industry" placeholder="SaaS">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-location">Location</label>
+                            <input type="text" class="config-input" id="ml-location" placeholder="London, UK">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-signal">Why are you contacting them?</label>
+                            <input type="text" class="config-input" id="ml-signal" placeholder="Met at SaaStr, asked about our pricing">
+                            <span class="form-hint">This becomes the trigger the AI personalises the message around.</span>
+                        </div>
+                    </div>
+                    <div class="modal__actions" style="margin-top:20px;display:flex;gap:12px;">
+                        <button class="btn btn--primary" id="btn-save-manual-lead" type="button" style="flex:2;">Add lead</button>
+                        <button class="btn btn--secondary" id="btn-cancel-manual-lead" type="button" style="flex:1;">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Message Composer ═══ -->
+    <div class="modal-overlay hidden" id="composer-overlay">
+        <div class="modal modal--composer" id="composer-modal">
+            <div class="modal__header">
+                <h2 class="modal__title" id="composer-title">Draft message</h2>
+                <button class="modal__close" id="composer-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div class="composer-meta" id="composer-meta"></div>
+
+                <div class="composer-actions">
+                    <button class="btn btn--primary" id="btn-composer-generate">
+                        <span id="composer-generate-label">Generate with AI</span>
+                    </button>
+                    <button class="btn btn--gemini" id="btn-composer-gemini" title="Build the prompt, open Gemini under your own Google login, paste the answer back">
+                        Open in Gemini
+                    </button>
+                    <select class="config-input composer-template-select" id="composer-template">
+                        <option value="">Apply a template…</option>
+                    </select>
+                </div>
+
+                <div id="composer-notice" class="composer-notice"></div>
+
+                <div class="form-group">
+                    <label class="form-label" for="composer-to">To</label>
+                    <input type="email" class="config-input" id="composer-to" placeholder="no email on this lead — add one to send">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="composer-subject">Subject</label>
+                    <input type="text" class="config-input" id="composer-subject" placeholder="Subject line">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="composer-body">Message</label>
+                    <textarea class="config-input composer-body" id="composer-body" rows="14" placeholder="Write, or generate a first draft above…"></textarea>
+                    <span class="form-hint" id="composer-wordcount"></span>
+                </div>
+
+                <div class="composer-send-row">
+                    <button class="btn btn--primary" id="btn-composer-send">Send now</button>
+                    <input type="datetime-local" class="config-input composer-when" id="composer-when">
+                    <button class="btn btn--secondary" id="btn-composer-schedule">Schedule</button>
+                    <button class="btn btn--secondary" id="btn-composer-save-template">Save as template</button>
+                </div>
+                <div class="composer-alt" id="composer-alt-links"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Gemini Handoff Modal — the keyless path ═══ -->
+    <div class="modal-overlay hidden" id="gemini-overlay">
+        <div class="modal modal--gemini" id="gemini-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Write it in Gemini</h2>
+                <button class="modal__close" id="gemini-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <ol class="gemini-steps">
+                    <li id="gemini-step-copy"><strong>Copying the prompt…</strong></li>
+                    <li>Paste it into Gemini (Ctrl+V / ⌘V) and press enter.</li>
+                    <li>Copy Gemini's answer and paste it in the box below.</li>
+                </ol>
+                <p class="outreach-hint">
+                    No API key is used here — the message is written by your own Gemini account.
+                    A server cannot use a browser login on your behalf, which is why this step is manual.
+                </p>
+
+                <div class="gemini-actions">
+                    <button class="btn btn--gemini" id="btn-gemini-open">Open Gemini &amp; copy prompt</button>
+                    <button class="btn btn--secondary" id="btn-gemini-copy">Copy prompt again</button>
+                </div>
+
+                <details class="gemini-prompt-details">
+                    <summary>See the prompt being sent</summary>
+                    <pre class="gemini-prompt" id="gemini-prompt-preview"></pre>
+                </details>
+
+                <div class="form-group" style="margin-top:14px;">
+                    <label class="form-label" for="gemini-paste">Paste Gemini's answer here</label>
+                    <textarea class="config-input composer-body" id="gemini-paste" rows="10" placeholder="Subject: …&#10;&#10;Hi …"></textarea>
+                </div>
+                <button class="btn btn--primary" id="btn-gemini-apply" style="width:100%;">Use this as my draft</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Discovery Progress Toast ═══ -->
     <div class="discovery-toast hidden" id="discovery-toast">
         <div class="discovery-toast__spinner"></div>
@@ -541,6 +817,8 @@
     <script src="js/views.js"></script>
     <script src="js/charts.js"></script>
     <script src="js/modal.js"></script>
+    <script src="js/review.js"></script>
+    <script src="js/outreach.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

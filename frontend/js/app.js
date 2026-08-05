@@ -13,6 +13,7 @@ const App = {
 
   async init() {
     Modal.init();
+    Review.init();
     this.bindEvents();
 
     // Resolve the active ICP before anything fetches data. Without this the
@@ -26,6 +27,7 @@ const App = {
 
     this.initRadarStream();
     this.initCopilotChat();
+    await Outreach.init();
 
     await this.refreshLeadsFromBackend();
 
@@ -145,7 +147,20 @@ const App = {
         if (tab.dataset.tab === 'analytics' && window.Charts) {
           Charts.renderAll(this.filteredLeads);
         }
+        // The outreach panes read live server state (drafts, sent log), so
+        // they refresh on entry rather than showing whatever was last loaded.
+        if (tab.dataset.tab === 'outreach' && window.Outreach) {
+          Outreach.refreshStatus();
+          Outreach.refreshMessages();
+          Outreach.showSub(Outreach.activeSub);
+        }
       });
+    });
+
+    // Table header "select all" mirrors the bulk bar's select-all.
+    document.getElementById('table-select-all')?.addEventListener('change', (e) => {
+      if (e.target.checked) Review.selectAllShown();
+      else Review.clearSelection();
     });
 
     // View Mode Switcher (Grid / Table / Split)
@@ -177,10 +192,8 @@ const App = {
       this.triggerDiscoveryPipeline();
     });
 
-    // Export CSV
-    document.getElementById('btn-export')?.addEventListener('click', () => {
-      this.exportToCSV();
-    });
+    // Export CSV is handled by Review, which downloads it from the API so the
+    // file covers every accepted lead rather than only the loaded page.
   },
 
   applyFilters() {
@@ -205,6 +218,8 @@ const App = {
     this.updateMetrics(leads);
     this.updateChannelMix(leads);
     Views.render(leads);
+
+    if (window.Outreach) Outreach.updateTabCount();
   },
 
   updateChannelMix(leads) {
@@ -609,7 +624,7 @@ const App = {
     }
 
     try {
-      const url = `${this.API_BASE}/api/leads?icpId=${encodeURIComponent(targetIcp)}&limit=500`;
+      const url = `${this.API_BASE}/api/leads?icpId=${encodeURIComponent(targetIcp)}&limit=1000`;
       const res = await fetch(url);
       const data = await res.json();
 
@@ -618,6 +633,9 @@ const App = {
       } else {
         this.allLeads = [];
       }
+      // Server-side review counts cover the whole ICP, not just this page, so
+      // the sidebar totals stay right even when the list is truncated.
+      if (window.Review && data?.counts) Review.renderCounts(data.counts);
     } catch (err) {
       console.warn('Backend leads fetch notice:', err.message);
       this.allLeads = [];
@@ -659,22 +677,28 @@ const App = {
   },
 
 
-  exportToCSV() {
-    const headers = ['Company', 'Industry', 'Size', 'Location', 'Contact Name', 'Title', 'Email', 'Score', 'Tier', 'Source'];
-    const rows = this.filteredLeads.map(l => [
-      l.company_name, l.company_industry, l.company_size, l.company_location,
-      l.contact_name, l.contact_title, l.contact_email,
-      l.total_score, l.tier, l.source
-    ]);
+  /**
+   * Brief confirmation for actions that succeeded.
+   *
+   * Review and outreach actions are frequent and mostly uneventful — an alert()
+   * for each one would make the dashboard unusable, but silence leaves the user
+   * unsure whether an accept registered. Failures still use alert(), because
+   * those must not be missed.
+   */
+  toast(message) {
+    let el = document.getElementById('app-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'app-toast';
+      el.className = 'app-toast';
+      document.body.appendChild(el);
+    }
 
-    const csv = [headers.join(','), ...rows.map(r => r.map(v => `"${(v || '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-    const blob = new Blob([csv], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `leadpulse_prospects_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    el.textContent = message;
+    el.classList.add('app-toast--visible');
+
+    clearTimeout(this.toastTimer);
+    this.toastTimer = setTimeout(() => el.classList.remove('app-toast--visible'), 3200);
   }
 };
 

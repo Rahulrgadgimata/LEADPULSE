@@ -19,6 +19,7 @@ const Modal = {
     content.innerHTML = `
       <div style="margin-bottom:20px;">
         <span class="badge badge--${tier === 'hot' ? 'success' : 'warning'}" style="margin-bottom:8px;display:inline-block;">${tier.toUpperCase()} TIER PROSPECT</span>
+        ${Review.badgeHtml(lead)}
         <h1 style="font-family:var(--font-display);font-size:1.8rem;font-weight:800;color:var(--text-primary);">${this.escapeHtml(lead.company_name)}</h1>
         <p style="color:var(--text-tertiary);font-size:0.85rem;">${lead.company_description ? this.escapeHtml(lead.company_description) : '<em style="opacity:.6">No description captured for this company.</em>'}</p>
       </div>
@@ -80,12 +81,25 @@ const Modal = {
         </div>
       </div>
 
+      <!-- The decision this dashboard exists to capture -->
+      <div class="drawer-review">
+        <h3 style="font-size:0.82rem;font-weight:700;color:var(--text-tertiary);letter-spacing:0.06em;margin-bottom:10px;">YOUR DECISION</h3>
+        ${Review.actionsHtml(lead.id, lead, 'lg')}
+      </div>
+
       <!-- Quick Action Buttons -->
       <div style="display:flex;gap:10px;margin-top:20px;">
-        <button class="btn btn--primary" style="flex:1;" onclick="Modal.draftEmail('${lead.id}')">📧 Draft Personalized Email</button>
-        <button class="btn btn--secondary" onclick="Modal.closeDrawer()">Close</button>
+        <button class="btn btn--primary" style="flex:1;" data-compose-lead="${this.escapeHtml(lead.id)}">📧 Write first message</button>
+        <button class="btn btn--secondary" id="drawer-close-btn">Close</button>
       </div>
     `;
+
+    // Listeners rather than inline onclick: the app's CSP sets
+    // script-src-attr 'none', which blocks inline handlers outright.
+    content.querySelector('#drawer-close-btn')?.addEventListener('click', () => this.closeDrawer());
+
+    // One delegated handler covers the review buttons and the compose button.
+    Review.bindDelegatedActions(content);
 
     overlay.classList.remove('hidden');
     document.body.style.overflow = 'hidden';
@@ -521,20 +535,15 @@ const Modal = {
     if (modal) modal.classList.add('hidden');
   },
 
+  /**
+   * Open the message composer for a lead.
+   *
+   * This used to type a prompt into the copilot chat box and leave the user to
+   * copy the reply out by hand. It now opens the real composer, where the draft
+   * is saved against the lead and can be edited, scheduled and sent.
+   */
   draftEmail(leadId) {
-    // Leads come from the backend; there is no local demo dataset.
-    const lead = (window.App?.allLeads || []).find(l => l.id === leadId);
-    if (!lead) return;
-
-    // Switch to copilot tab and populate draft prompt
-    document.getElementById('tab-ai-assistant')?.click();
-
-    const chatInput = document.getElementById('chat-input');
-    if (chatInput) {
-      chatInput.value = `Draft a personalized cold outreach email for ${lead.contact_name} (${lead.contact_title} at ${lead.company_name}) mentioning their recent hiring signals.`;
-      chatInput.focus();
-    }
-    this.closeDrawer();
+    window.Outreach?.openComposer(leadId);
   },
 
   init() {

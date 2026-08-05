@@ -101,6 +101,63 @@ function init() {
     completed_at TEXT
   );`;
 
+  // ── Phase 2: outreach ───────────────────────────────────────────────────
+  // A draft the user has not sent is still a message row; `status` is what
+  // separates a draft from something that actually left the building. Keeping
+  // both in one table means the sent log and the editor read the same record,
+  // so an edit made before sending is exactly what the log later shows.
+  const createMessages = `CREATE TABLE IF NOT EXISTS messages (
+    id TEXT PRIMARY KEY,
+    lead_id TEXT,
+    icp_id TEXT,
+    template_id TEXT,
+    channel TEXT DEFAULT 'email',
+    to_email TEXT,
+    to_name TEXT,
+    from_email TEXT,
+    subject TEXT,
+    body TEXT,
+    status TEXT DEFAULT 'draft',
+    generated_by TEXT,
+    generation_prompt TEXT,
+    personalisation TEXT,
+    scheduled_at TEXT,
+    sent_at TEXT,
+    provider_message_id TEXT,
+    error_message TEXT,
+    send_attempts INTEGER DEFAULT 0,
+    unsubscribe_token TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );`;
+
+  const createMessageTemplates = `CREATE TABLE IF NOT EXISTS message_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    subject TEXT,
+    body TEXT,
+    channel TEXT DEFAULT 'email',
+    tags TEXT,
+    times_used INTEGER DEFAULT 0,
+    source_message_id TEXT,
+    created_at TEXT,
+    updated_at TEXT
+  );`;
+
+  // Opt-outs are checked on every send, so they live apart from leads: a lead
+  // can be deleted and re-discovered, but the person's "do not contact me"
+  // must outlive that.
+  const createSuppressions = `CREATE TABLE IF NOT EXISTS suppressions (
+    id TEXT PRIMARY KEY,
+    email TEXT,
+    domain TEXT,
+    reason TEXT,
+    source TEXT,
+    evidence TEXT,
+    lead_id TEXT,
+    created_at TEXT
+  );`;
+
   db.exec(createUsers);
   db.exec(createIcp);
   db.exec(createLeads);
@@ -108,6 +165,9 @@ function init() {
   db.exec(createSignals);
   db.exec(createScoreHistory);
   db.exec(createDiscoveryJobs);
+  db.exec(createMessages);
+  db.exec(createMessageTemplates);
+  db.exec(createSuppressions);
 
   // Safely add any missing columns for existing databases
   try {
@@ -124,6 +184,42 @@ function init() {
   try {
     db.prepare("ALTER TABLE discovery_jobs ADD COLUMN last_progress_at TEXT").run();
   } catch (e) {}
+
+  // Review state is deliberately separate from `status`. `status` tracks where
+  // a lead sits in the discovery pipeline ('new' → 'scored'); review_status
+  // records the human decision. Overloading one column would have made a
+  // rescore silently erase an accept.
+  const leadColumns = [
+    "ALTER TABLE leads ADD COLUMN review_status TEXT DEFAULT 'pending'",
+    'ALTER TABLE leads ADD COLUMN reviewed_at TEXT',
+    'ALTER TABLE leads ADD COLUMN review_note TEXT',
+    'ALTER TABLE leads ADD COLUMN user_notes TEXT',
+    'ALTER TABLE leads ADD COLUMN is_manual INTEGER DEFAULT 0',
+    'ALTER TABLE leads ADD COLUMN last_contacted_at TEXT',
+  ];
+  for (const sql of leadColumns) {
+    try { db.prepare(sql).run(); } catch (e) { /* column already present */ }
+  }
+
+  // Rows written before review_status existed default to NULL, which no filter
+  // matches — backfill so they show up as pending rather than disappearing.
+  try {
+    db.prepare("UPDATE leads SET review_status = 'pending' WHERE review_status IS NULL").run();
+  } catch (e) {}
+
+  const indexes = [
+    'CREATE INDEX IF NOT EXISTS idx_leads_review_status ON leads(review_status)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_lead_id ON messages(lead_id)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_scheduled_at ON messages(scheduled_at)',
+    'CREATE INDEX IF NOT EXISTS idx_messages_sent_at ON messages(sent_at)',
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unsub_token ON messages(unsubscribe_token)',
+    'CREATE INDEX IF NOT EXISTS idx_suppressions_email ON suppressions(email)',
+    'CREATE INDEX IF NOT EXISTS idx_suppressions_domain ON suppressions(domain)',
+  ];
+  for (const sql of indexes) {
+    try { db.exec(sql); } catch (e) { logger.warn(`Index skipped: ${e.message}`); }
+  }
 
   // Auto-seed default ICP if table is empty
   try {

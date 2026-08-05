@@ -17,6 +17,10 @@ module.exports = {
   RATE_LIMIT_PER_MINUTE: parseInt(process.env.RATE_LIMIT_PER_MINUTE) || 120,
   DISCOVERY_RATE_LIMIT_PER_MINUTE: parseInt(process.env.DISCOVERY_RATE_LIMIT_PER_MINUTE) || 3,
   COPILOT_RATE_LIMIT_PER_MINUTE: parseInt(process.env.COPILOT_RATE_LIMIT_PER_MINUTE) || 15,
+  // Drafting spends AI quota; sending spends domain reputation. Both are
+  // deliberate, human-paced actions, so a low ceiling costs nothing in normal
+  // use and caps the damage from a stuck retry loop in the UI.
+  OUTREACH_RATE_LIMIT_PER_MINUTE: parseInt(process.env.OUTREACH_RATE_LIMIT_PER_MINUTE) || 30,
 
   // SQLite – use absolute path so it always resolves to backend dir
   SQLITE_PATH: process.env.SQLITE_PATH || path.join(__dirname, '../database.sqlite'),
@@ -173,6 +177,72 @@ module.exports = {
   // X / Twitter search paging (each page costs API quota).
   TWITTER_MAX_PAGES: parseInt(process.env.TWITTER_MAX_PAGES) || 3,
   TWITTER_RESULTS_PER_PAGE: parseInt(process.env.TWITTER_RESULTS_PER_PAGE) || 100,
+
+  // ── Outreach: AI message generation ──────────────────────────────────────
+  // Which engine writes the first draft. 'auto' takes the first configured
+  // provider in order: Gemini → Claude → Groq → template. The template path
+  // has no dependencies, so the Generate button never dead-ends on a missing
+  // key; it just produces a plainer draft.
+  //   Values: auto | gemini | claude | groq | template
+  OUTREACH_AI_PROVIDER: process.env.OUTREACH_AI_PROVIDER || 'auto',
+
+  // Gemini via the Google Generative Language API. Keyless generation is also
+  // available through the browser handoff below, which needs nothing set here.
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+
+  // Browser handoff: the server builds the prompt, the browser opens Gemini
+  // already signed in as the user, and the user pastes the result back. No API
+  // key is involved — Google does not expose a way for a server to borrow a
+  // browser session, so the human is the bridge.
+  GEMINI_WEB_URL: process.env.GEMINI_WEB_URL || 'https://gemini.google.com/app',
+
+  // Anthropic, for the Claude-drafted path named in the Phase 2 spec.
+  ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '',
+  ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
+
+  // Sender identity written into every draft's sign-off.
+  OUTREACH_SENDER_NAME: process.env.OUTREACH_SENDER_NAME || '',
+  OUTREACH_SENDER_TITLE: process.env.OUTREACH_SENDER_TITLE || '',
+  OUTREACH_SENDER_COMPANY: process.env.OUTREACH_SENDER_COMPANY || '',
+  // One line describing what you sell. This is the single biggest lever on
+  // draft quality: without it the model can only guess why you are writing.
+  OUTREACH_VALUE_PROP: process.env.OUTREACH_VALUE_PROP || '',
+
+  // ── Outreach: SMTP delivery ─────────────────────────────────────────────
+  // Works with SendGrid (host smtp.sendgrid.net, user "apikey", pass = the API
+  // key), Gmail app passwords, or any other SMTP relay.
+  SMTP_HOST: process.env.SMTP_HOST || '',
+  SMTP_PORT: parseInt(process.env.SMTP_PORT) || 587,
+  // Implicit TLS on 465; STARTTLS on 587. Defaults from the port so a wrong
+  // combination cannot silently downgrade the connection.
+  SMTP_SECURE: process.env.SMTP_SECURE
+    ? process.env.SMTP_SECURE === 'true'
+    : parseInt(process.env.SMTP_PORT) === 465,
+  SMTP_USER: process.env.SMTP_USER || '',
+  SMTP_PASS: process.env.SMTP_PASS || '',
+
+  MAIL_FROM_EMAIL: process.env.MAIL_FROM_EMAIL || process.env.SMTP_USER || '',
+  MAIL_FROM_NAME: process.env.MAIL_FROM_NAME || 'LeadPulse AI',
+  MAIL_REPLY_TO: process.env.MAIL_REPLY_TO || '',
+
+  // Nothing leaves the building while this is on: sends are recorded in the
+  // log as usual but no SMTP connection is opened. Useful for demos and for a
+  // first run against real leads.
+  OUTREACH_DRY_RUN: process.env.OUTREACH_DRY_RUN === 'true',
+
+  // A cold-email mistake is expensive and irreversible, so cap the blast
+  // radius: per-run send limit and a rolling 24h ceiling.
+  OUTREACH_DAILY_SEND_LIMIT: parseInt(process.env.OUTREACH_DAILY_SEND_LIMIT) || 200,
+  OUTREACH_BULK_SEND_LIMIT: parseInt(process.env.OUTREACH_BULK_SEND_LIMIT) || 50,
+
+  // How often the scheduler looks for scheduled messages that have come due.
+  OUTREACH_SCHEDULER_INTERVAL_MS: parseInt(process.env.OUTREACH_SCHEDULER_INTERVAL_MS) || 30000,
+  OUTREACH_SCHEDULER_ENABLED: process.env.OUTREACH_SCHEDULER_ENABLED !== 'false',
+
+  // Public origin used to build unsubscribe links. Must be reachable by the
+  // recipient — localhost produces a link only you can open.
+  APP_BASE_URL: (process.env.APP_BASE_URL || '').replace(/\/$/, ''),
 
   // Scheduler
   CRON_SCHEDULE: process.env.CRON_SCHEDULE || '0 2 * * *', // 02:00 daily

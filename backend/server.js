@@ -30,6 +30,7 @@ const leadsRoutes = require('./routes/leads');
 const icpRoutes = require('./routes/icp');
 const signalsRoutes = require('./routes/signals');
 const copilotRoutes = require('./routes/copilot');
+const outreachRoutes = require('./routes/outreach');
 const { optionalAuth } = require('./middleware/auth');
 const { rateLimit } = require('./middleware/rateLimit');
 
@@ -142,6 +143,20 @@ app.use('/api/copilot', rateLimit({
   message: 'Too many copilot messages. Please wait a moment.'
 }), optionalAuth, copilotRoutes);
 
+// Outreach. Drafting spends AI quota and sending spends domain reputation, so
+// those two paths get a tight budget of their own — mounted on the specific
+// prefixes rather than on /api/outreach as a whole, because a recipient
+// clicking an unsubscribe link must never be turned away by a rate limit.
+const outreachWriteLimiter = rateLimit({
+  windowMs: 60000,
+  max: config.OUTREACH_RATE_LIMIT_PER_MINUTE,
+  name: 'outreach',
+  message: 'Too many outreach requests. Each draft costs AI quota and each send costs deliverability — wait a moment.'
+});
+app.use('/api/outreach/generate', outreachWriteLimiter);
+app.use('/api/outreach/messages', outreachWriteLimiter);
+app.use('/api/outreach', optionalAuth, outreachRoutes);
+
 // ─── Provider status ────────────────────────────────
 // Reports which integrations are configured so the UI can show real state
 // instead of a hardcoded "active" badge. Booleans only — never key values.
@@ -166,6 +181,14 @@ app.get('/api/status', optionalAuth, (req, res) => {
     discovery: {
       targetLeads: config.DISCOVERY_TARGET_LEADS,
       maxQueries: config.DISCOVERY_MAX_QUERIES
+    },
+    // Phase 2. Which engine drafts messages and whether mail can actually
+    // leave — the UI needs both to avoid offering a Send button that cannot
+    // work. See /api/outreach/status for the full picture.
+    outreach: {
+      ai: require('./services/outreach/messageGenerator').describe(),
+      smtp: require('./services/outreach/mailer').status(),
+      scheduler: require('./services/outreach/scheduler').status()
     }
   });
 });
@@ -192,11 +215,33 @@ app.get('/api', (req, res) => {
         'GET /api/scoring/history/:leadId': 'Get score history',
       },
       leads: {
-        'GET /api/leads': 'List leads (with filters)',
+        'GET /api/leads': 'List leads (filter by tier, industry, geography, source, review status, date, score)',
         'GET /api/leads/stats': 'Get lead statistics',
-        'GET /api/leads/:id': 'Get lead details',
+        'GET /api/leads/filter-options': 'Distinct industries / sources / geographies for the filter sidebar',
+        'GET /api/leads/export.csv': 'CSV export (accepted leads by default; any list filter applies)',
+        'POST /api/leads': 'Add a lead manually',
+        'POST /api/leads/bulk-review': 'Accept / reject / hold many leads at once',
+        'GET /api/leads/:id': 'Get lead details, signals and outreach history',
+        'PATCH /api/leads/:id/review': 'Accept / reject / hold one lead',
         'PATCH /api/leads/:id': 'Update a lead',
         'DELETE /api/leads/:id': 'Delete a lead',
+      },
+      outreach: {
+        'GET /api/outreach/status': 'Which AI engine drafts, whether SMTP can send, scheduler state',
+        'POST /api/outreach/generate/:leadId': 'Draft a message (mode=generate) or build the Gemini handoff prompt (mode=handoff)',
+        'GET /api/outreach/prompt/:leadId': 'The generation prompt for a lead, without generating',
+        'GET /api/outreach/messages': 'Sent log and draft queue (filter by status / lead / ICP)',
+        'PUT /api/outreach/messages/:id': 'Edit a draft, or paste back what Gemini wrote',
+        'POST /api/outreach/messages/:id/send': 'Send now',
+        'POST /api/outreach/messages/:id/schedule': 'Send at a chosen time',
+        'POST /api/outreach/messages/:id/cancel': 'Pull a scheduled message back to draft',
+        'POST /api/outreach/messages/send-bulk': 'Send several drafts at once',
+        'GET /api/outreach/templates': 'List saved templates',
+        'POST /api/outreach/templates': 'Save a draft as a reusable template',
+        'POST /api/outreach/templates/:id/apply/:leadId': 'Apply a template to a lead',
+        'GET /api/outreach/suppressions': 'The do-not-contact list',
+        'POST /api/outreach/replies/scan': 'Scan a reply for opt-out language and suppress the sender',
+        'GET /api/outreach/unsubscribe/:token': 'Public one-click unsubscribe',
       },
       icp: {
         'POST /api/icp': 'Create an ICP',
@@ -256,6 +301,11 @@ app.listen(PORT, () => {
   logger.info(`  UI: http://localhost:${PORT}`);
   logger.info(`  API: http://localhost:${PORT}/api`);
   logger.info(`═══════════════════════════════════════════════`);
+
+  // Scheduled sends are polled from the database rather than held in memory,
+  // so messages that came due while the process was down still go out — the
+  // first tick runs immediately on boot for exactly that case.
+  require('./services/outreach/scheduler').start();
 
   // Warm the Scrapling sidecar so the first discovery run is not cold-starting
   // Python + curl_cffi mid-search.

@@ -10,18 +10,79 @@ const Filters = {
     source: [],
     size: [],
     geo: [],
+    review: [],
+    date: [],
   },
 
   /**
    * Initialize all filter groups from the data
    */
   init(leads) {
+    this.buildReviewFilters(leads);
     this.buildIndustryFilters(leads);
     this.buildTierFilters(leads);
     this.buildSourceFilters(leads);
     this.buildSizeFilters(leads);
     this.buildGeoFilters(leads);
+    this.bindDateFilters();
     this.bindClearAll();
+  },
+
+  /**
+   * The review queue chips — the primary way a user works this dashboard:
+   * "show me what I haven't decided on yet".
+   */
+  buildReviewFilters(leads) {
+    const container = document.getElementById('filter-review');
+    if (!container) return;
+
+    const statuses = [
+      { value: 'pending', label: '· Pending' },
+      { value: 'accepted', label: '✓ Accepted' },
+      { value: 'hold', label: '⏸ Hold' },
+      { value: 'rejected', label: '✕ Rejected' },
+    ];
+
+    // Preserve what was already selected: this runs on every data refresh, and
+    // rebuilding the chips from scratch would silently drop the user's filter.
+    const active = new Set(this.activeFilters.review);
+    container.innerHTML = '';
+
+    for (const status of statuses) {
+      const count = leads.filter(l => (l.review_status || 'pending') === status.value).length;
+      const chip = this.createChip(`${status.label} (${count})`, 'review', status.value, `chip--review-${status.value}`);
+      if (active.has(status.value)) chip.classList.add('active');
+      container.appendChild(chip);
+    }
+  },
+
+  /** Refresh the counts on the review chips without disturbing the selection. */
+  updateReviewCounts(counts) {
+    document.querySelectorAll('.chip[data-group="review"]').forEach(chip => {
+      const value = chip.dataset.value;
+      if (!(value in counts)) return;
+      chip.textContent = chip.textContent.replace(/\(\d+\)$/, `(${counts[value]})`);
+    });
+  },
+
+  bindDateFilters() {
+    // These chips are static in the HTML, so they only need binding once.
+    const container = document.getElementById('filter-dates');
+    if (!container || container.dataset.bound === 'true') return;
+    container.dataset.bound = 'true';
+
+    container.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        // Date ranges are mutually exclusive — "today" and "last 30 days"
+        // together just means "last 30 days", so selecting one clears the rest.
+        const wasActive = chip.classList.contains('active');
+        container.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        if (!wasActive) chip.classList.add('active');
+
+        this.updateActiveFilters();
+        if (window.App) window.App.applyFilters();
+      });
+    });
   },
 
   /**
@@ -165,7 +226,7 @@ const Filters = {
    * Read all active chips and update the activeFilters object
    */
   updateActiveFilters() {
-    const groups = ['industry', 'tier', 'source', 'size', 'geo'];
+    const groups = ['industry', 'tier', 'source', 'size', 'geo', 'review', 'date'];
     groups.forEach(group => {
       const activeChips = document.querySelectorAll(`.chip[data-group="${group}"].active`);
       this.activeFilters[group] = Array.from(activeChips).map(c => c.dataset.value);
@@ -208,6 +269,21 @@ const Filters = {
         if (!geoMatch) return false;
       }
 
+      // Review status — leads stored before this column existed read as pending.
+      if (this.activeFilters.review.length > 0) {
+        if (!this.activeFilters.review.includes(lead.review_status || 'pending')) return false;
+      }
+
+      // Date discovered, as a rolling window of N days.
+      if (this.activeFilters.date.length > 0) {
+        const days = Number(this.activeFilters.date[0]);
+        const discovered = new Date(lead.discovery_timestamp || lead.created_at || 0).getTime();
+        // A lead with no usable timestamp is excluded rather than shown, so
+        // "discovered today" cannot quietly include rows of unknown age.
+        if (!Number.isFinite(discovered) || discovered === 0) return false;
+        if (Date.now() - discovered > days * 86400000) return false;
+      }
+
       return true;
     });
   },
@@ -219,7 +295,7 @@ const Filters = {
     document.querySelectorAll('.chip.active').forEach(chip => {
       chip.classList.remove('active');
     });
-    this.activeFilters = { industry: [], tier: [], source: [], size: [], geo: [] };
+    this.activeFilters = { industry: [], tier: [], source: [], size: [], geo: [], review: [], date: [] };
     if (window.App) window.App.applyFilters();
   },
 
