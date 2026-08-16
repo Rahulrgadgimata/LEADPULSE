@@ -28,6 +28,12 @@ async function throttle(overrideDelayMs = null) {
 }
 
 async function getBrowser() {
+  // Throwing rather than returning null keeps the guard in one place: every
+  // caller already wraps this in a try that degrades to an empty result set.
+  if (!config.SCRAPER_BROWSER_ENABLED) {
+    throw new Error('browser fetch disabled (SCRAPER_BROWSER_ENABLED=false)');
+  }
+
   if (browserPromise) {
     try {
       const existing = await browserPromise;

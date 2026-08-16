@@ -104,6 +104,15 @@ module.exports = {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   SCRAPER_DELAY_MS: parseInt(process.env.SCRAPER_DELAY_MS) || 2500,
 
+  // Whether collectors may fall back to a headless Chromium. Each of the three
+  // search collectors keeps its own browser, so a run can hold three Chromium
+  // process trees at 150-300MB each — enough to get the container OOM-killed on
+  // a small instance, which takes the whole run (and, without a disk, the
+  // database) with it. Turn this off there: Scrapling's TLS-impersonation
+  // fetcher and the plain-HTTP paths still carry search, they just block more
+  // often. Every caller already treats a browser failure as an empty result.
+  SCRAPER_BROWSER_ENABLED: process.env.SCRAPER_BROWSER_ENABLED !== 'false',
+
   // ── Scrapling (Python) sidecar — robust fetch/search ─────────────────────
   // https://github.com/D4Vinci/Scrapling  (Fetcher / StealthyFetcher)
   // Node collectors call this first; Puppeteer/axios remain as fallback.

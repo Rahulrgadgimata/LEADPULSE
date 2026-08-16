@@ -317,11 +317,19 @@ class GroqClient {
         lastError = err;
         const status = err.response?.status;
 
-        // Not every model accepts reasoning_effort. Drop it and retry rather
-        // than failing the call outright.
+        // Not every model accepts every reasoning_effort value — Groq's
+        // openai/gpt-oss-* reject "none" and allow only low/medium/high.
+        // Step down to the cheapest accepted value before giving up on the
+        // parameter entirely: dropping it outright lets a reasoning model spend
+        // the whole max_tokens budget thinking and return empty content, which
+        // surfaces as "empty completion" rather than as the config problem it is.
         if (status === 400 && effort && /reasoning_effort/i.test(JSON.stringify(err.response?.data || ''))) {
-          logger.debug(`[ai] ${tier.model} rejected reasoning_effort="${effort}"; retrying without it`);
-          effort = null;
+          const nextEffort = effort === 'none' ? 'low' : null;
+          logger.debug(
+            `[ai] ${tier.model} rejected reasoning_effort="${effort}"; ` +
+            `retrying with ${nextEffort ? `"${nextEffort}"` : 'the parameter removed'}`
+          );
+          effort = nextEffort;
           continue;
         }
 

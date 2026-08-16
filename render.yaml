@@ -42,6 +42,12 @@ services:
         value: "true"
       - key: SQLITE_PATH
         value: /var/data/database.sqlite
+      # The free instance is capped at 512Mi and the container was OOM-killed
+      # (exit 137) twice during discovery runs. Hold V8's heap well under the
+      # cgroup limit so it collects garbage instead of growing until the kernel
+      # kills the process — an OOM kill also wipes the diskless database.
+      - key: NODE_OPTIONS
+        value: --max-old-space-size=320
       # Empty = same-origin only, which is right because this service also
       # serves the UI.
       - key: CORS_ORIGIN
@@ -72,8 +78,12 @@ services:
         sync: false
       - key: GROQ_MODEL_EXTRACTION
         value: qwen/qwen3.6-27b
+      # Qwen for chat too. Groq's openai/gpt-oss-* now reject
+      # reasoning_effort="none" (low/medium/high only), so every call paid a
+      # rejected round-trip and then burned its output budget on reasoning —
+      # returning empty content on the shorter prompts.
       - key: GROQ_MODEL_CHAT
-        value: openai/gpt-oss-120b
+        value: qwen/qwen3.6-27b
       - key: GROQ_EXTRACTION_REASONING
         value: none
       - key: GROQ_TPM_LIMIT
@@ -116,6 +126,8 @@ services:
         value: fetcher
       - key: SCRAPLING_PYTHON
         value: python3
+      - key: SCRAPLING_CONCURRENCY
+        value: "2"
 
       # ── Discovery volume & pacing ────────────────────────────────────────
       - key: DISCOVERY_TARGET_LEADS
@@ -124,12 +136,14 @@ services:
         value: "6"
       - key: DISCOVERY_STALE_JOB_MINUTES
         value: "10"
+      # Halved from 4: each parallel worker holds a page of scraped HTML, and
+      # the peak of those is what pushed the instance past 512Mi.
       - key: SCRAPER_CONCURRENCY
-        value: "4"
+        value: "2"
       - key: SCRAPER_PAGE_TIMEOUT_MS
         value: "6000"
       - key: ENRICHMENT_CONCURRENCY
-        value: "4"
+        value: "2"
       - key: LINKEDIN_TARGET_LEADS
         value: "5"
       - key: LINKEDIN_MAX_QUERIES
@@ -152,6 +166,12 @@ services:
         value: "240000"
       - key: SCRAPER_DELAY_MS
         value: "2000"
+      # No headless Chromium on a 512Mi instance — three collectors each keep
+      # their own browser, and that is what triggered the OOM kills. Scrapling's
+      # TLS-impersonation fetcher and the plain-HTTP paths carry search instead.
+      # Turn this back on if the service moves to an instance with real memory.
+      - key: SCRAPER_BROWSER_ENABLED
+        value: "false"
       - key: SERPER_API_KEY
         sync: false
       - key: BRAVE_API_KEY

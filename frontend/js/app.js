@@ -555,9 +555,33 @@ const App = {
       const jobId = data.jobId;
 
       // Poll real job status
+      let missingPolls = 0;
       const pollInterval = setInterval(async () => {
         try {
           const statusRes = await fetch(`${this.API_BASE}/api/discovery/status/${encodeURIComponent(jobId)}`);
+
+          // A job that stops existing means the server restarted mid-run and
+          // took the job row with it. Without this the loop polled a 404 once a
+          // second forever, leaving the progress bar frozen with no explanation.
+          // Tolerate a couple of misses first so a blip does not end a live run.
+          if (statusRes.status === 404) {
+            if (++missingPolls < 3) return;
+            clearInterval(pollInterval);
+            if (titleText) titleText.textContent = 'Discovery interrupted';
+            if (statusText) {
+              statusText.textContent =
+                'The server restarted mid-run, so this job was lost. Start it again.';
+            }
+            await this.refreshLeadsFromBackend();
+            setTimeout(() => {
+              toast.classList.add('hidden');
+              if (bar) bar.style.width = '0%';
+              if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline...';
+            }, 5000);
+            return;
+          }
+          missingPolls = 0;
+
           const statusData = await statusRes.json();
 
           if (statusData && statusData.progress !== undefined) {

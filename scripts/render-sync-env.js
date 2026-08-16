@@ -69,6 +69,16 @@ const overrides = {
   SCRAPLING_HOST: '127.0.0.1',
   SCRAPLING_PORT: '3765',
   SCRAPLING_PYTHON: 'python3',
+
+  // ── Fitting inside the 512Mi free instance ────────────────────────────────
+  // The container was OOM-killed (exit 137) twice mid-discovery, and because
+  // the free plan has no disk, each kill also wiped the database. A dev machine
+  // has memory to spare, so these are set here rather than in .env.
+  NODE_OPTIONS: '--max-old-space-size=320',
+  SCRAPER_BROWSER_ENABLED: 'false',
+  SCRAPER_CONCURRENCY: '2',
+  ENRICHMENT_CONCURRENCY: '2',
+  SCRAPLING_CONCURRENCY: '2',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying
