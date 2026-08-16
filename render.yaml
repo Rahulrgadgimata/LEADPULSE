@@ -159,7 +159,7 @@ services:
 
       # ── Scheduler ────────────────────────────────────────────────────────
       - key: CRON_SCHEDULE
-        value: 0 2 * * *
+        value: "0 2 * * *"
 
       # ── Phase 2: outreach ────────────────────────────────────────────────
       - key: OUTREACH_AI_PROVIDER
@@ -193,9 +193,8 @@ services:
       - key: OUTREACH_SCHEDULER_INTERVAL_MS
         value: "30000"
       # Unsubscribe links must resolve for the recipient, so this has to be the
-      # public Render URL. fromService reads it back from this service itself.
+      # public origin (https://leadpulse-ai.onrender.com). Left unsynced because
+      # a service cannot read its own RENDER_EXTERNAL_URL through fromService;
+      # `node scripts/render-sync-env.js` reads it off the API and fills it in.
       - key: APP_BASE_URL
-        fromService:
-          type: web
-          name: leadpulse-ai
-          envVarKey: RENDER_EXTERNAL_URL
+        sync: false
