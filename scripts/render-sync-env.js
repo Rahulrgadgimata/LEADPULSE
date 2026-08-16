@@ -88,7 +88,11 @@ function readDotEnv() {
 }
 
 (async () => {
-  const existing = await api('GET', `/v1/services/${serviceId}/env-vars?limit=100`);
+  const [service, existing] = await Promise.all([
+    api('GET', `/v1/services/${serviceId}`),
+    api('GET', `/v1/services/${serviceId}/env-vars?limit=100`),
+  ]);
+
   const merged = {};
   for (const row of existing || []) {
     const v = row.envVar || row;
@@ -96,6 +100,12 @@ function readDotEnv() {
   }
 
   Object.assign(merged, readDotEnv(), overrides);
+
+  // Unsubscribe links have to resolve for the recipient, so APP_BASE_URL must
+  // be the public origin — read it off the service rather than trusting a local
+  // .env that almost certainly points at localhost.
+  const publicUrl = service && service.serviceDetails && service.serviceDetails.url;
+  if (publicUrl) merged.APP_BASE_URL = publicUrl.replace(/\/$/, '');
 
   const payload = Object.entries(merged).map(([key, value]) => ({ key, value: String(value) }));
   await api('PUT', `/v1/services/${serviceId}/env-vars`, payload);
