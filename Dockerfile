@@ -12,6 +12,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
+# Declared before `npm install` so puppeteer skips its own ~170MB Chromium
+# download and uses the apt one above. Setting these later still works at
+# runtime but pays for the download on every build.
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_SKIP_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+
 COPY backend/package.json backend/package-lock.json* ./backend/
 RUN cd backend && npm install --omit=dev
 
@@ -21,21 +28,22 @@ RUN pip3 install --break-system-packages -r backend/scrapling/requirements.txt \
 
 COPY backend ./backend
 COPY frontend ./frontend
-COPY scripts/start-railway.sh /start-railway.sh
-RUN chmod +x /start-railway.sh
+COPY scripts/start.sh /start.sh
+RUN chmod +x /start.sh
 
 WORKDIR /app/backend
 
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV TRUST_PROXY=true
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 ENV SCRAPLING_PYTHON=python3
 ENV SCRAPLING_HOST=127.0.0.1
 ENV SCRAPLING_PORT=3765
-ENV SQLITE_PATH=/data/database.sqlite
+# /var/data is where Render mounts a persistent disk. Without a disk attached
+# the path still works, but the file lives in the container's own filesystem and
+# is discarded on every restart or deploy.
+ENV SQLITE_PATH=/var/data/database.sqlite
 
 EXPOSE 3000
 
-CMD ["/start-railway.sh"]
+CMD ["/start.sh"]

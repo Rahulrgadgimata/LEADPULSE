@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
+# Container entrypoint — host-agnostic (Render, Railway, plain Docker).
 set -euo pipefail
 
-mkdir -p /data
+# The database directory depends on where the host mounts its disk, so derive it
+# from SQLITE_PATH rather than hard-coding one platform's convention. Without
+# this, better-sqlite3 fails at require() time on a fresh container.
+DB_PATH="${SQLITE_PATH:-/var/data/database.sqlite}"
+mkdir -p "$(dirname "$DB_PATH")"
+
+echo "[boot] Data directory: $(dirname "$DB_PATH")"
 
 echo "[boot] Starting Scrapling sidecar..."
 python3 /app/backend/scrapling/server.py &

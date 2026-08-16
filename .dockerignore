@@ -1,0 +1,37 @@
+# Dependencies are installed inside the image, never copied in.
+node_modules
+backend/node_modules
+frontend/node_modules
+
+# Secrets belong in the host's environment settings, not baked into a layer.
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+backend/scrapling/.env.scrapling
+
+# Local database and its backups — production starts from a clean schema.
+*.sqlite
+*.sqlite3
+*.db
+*.bak
+backend/database.sqlite.bak*
+
+# Local runtime noise
+logs
+backend/logs
+*.log
+backend/scrapling/__pycache__
+backend/scrapling/**/__pycache__
+
+# Vendored Scrapling clone (large); the image installs from PyPI instead.
+backend/scrapling/upstream
+
+.git
+.gitignore
+.vscode
+.idea
+*.pdf
+scratch
+tmp

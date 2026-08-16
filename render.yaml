@@ -1,0 +1,201 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# One Docker web service running the Node API, the static frontend it serves,
+# and the Python Scrapling sidecar in the same container (they talk over
+# 127.0.0.1, so they must share a network namespace).
+#
+# Secrets are marked `sync: false`: Render prompts for them on first apply and
+# keeps them in the dashboard, so no key is ever committed here.
+
+services:
+  - type: web
+    name: leadpulse-ai
+    runtime: docker
+    plan: free
+    region: singapore
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api
+    autoDeploy: true
+
+    # ── Persistent storage ──────────────────────────────────────────────────
+    # The free instance type cannot mount a disk, so SQLite lives in the
+    # container filesystem and is wiped on every deploy, restart, and
+    # spin-down. Upgrade the plan to `starter` and uncomment this block to keep
+    # leads, users and sent-message history across restarts. SQLITE_PATH
+    # already points inside the mount path, so nothing else changes.
+    # disk:
+    #   name: leadpulse-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+
+    envVars:
+      # ── Server ───────────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3000"
+      # Render terminates TLS at its edge, so the client IP arrives in
+      # X-Forwarded-For. Without this every request rate-limits as one caller.
+      - key: TRUST_PROXY
+        value: "true"
+      - key: SQLITE_PATH
+        value: /var/data/database.sqlite
+      # Empty = same-origin only, which is right because this service also
+      # serves the UI.
+      - key: CORS_ORIGIN
+        value: ""
+
+      # ── Security ─────────────────────────────────────────────────────────
+      # generateValue makes Render mint a random secret on first deploy.
+      # Replace it with the existing value if current sessions must survive.
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+
+      # ── Rate limits (per IP per minute) ──────────────────────────────────
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "120"
+      - key: DISCOVERY_RATE_LIMIT_PER_MINUTE
+        value: "3"
+      - key: COPILOT_RATE_LIMIT_PER_MINUTE
+        value: "15"
+
+      # ── AI providers ─────────────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_API_KEY_FALLBACK
+        sync: false
+      - key: GROQ_CHAT_API_KEY
+        sync: false
+      - key: GROQ_MODEL_EXTRACTION
+        value: qwen/qwen3.6-27b
+      - key: GROQ_MODEL_CHAT
+        value: openai/gpt-oss-120b
+      - key: GROQ_EXTRACTION_REASONING
+        value: none
+      - key: GROQ_TPM_LIMIT
+        value: "11000"
+      - key: GROQ_RPM_LIMIT
+        value: "28"
+      - key: GROQ_BATCH_SIZE
+        value: "12"
+      - key: GROQ_CONCURRENCY
+        value: "1"
+      - key: MISTRAL_API_KEY
+        sync: false
+
+      # ── Enrichment & signals ─────────────────────────────────────────────
+      - key: HUNTER_API_KEY
+        sync: false
+      - key: APOLLO_API_KEY
+        sync: false
+      - key: NEWS_API_KEY
+        sync: false
+      - key: TWITTER_BEARER_TOKEN
+        sync: false
+      - key: REDDIT_CLIENT_ID
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_USER_AGENT
+        value: "nodejs:leadpulse-ai:1.0 (by /u/leadpulse)"
+
+      # ── Scrapling sidecar (same container) ───────────────────────────────
+      - key: SCRAPLING_ENABLED
+        value: "true"
+      - key: SCRAPLING_HOST
+        value: 127.0.0.1
+      - key: SCRAPLING_PORT
+        value: "3765"
+      # `fetcher` is curl_cffi TLS impersonation — no browser process, which
+      # matters on a 512MB free instance where Chromium would be OOM-killed.
+      - key: SCRAPLING_DEFAULT_MODE
+        value: fetcher
+      - key: SCRAPLING_PYTHON
+        value: python3
+
+      # ── Discovery volume & pacing ────────────────────────────────────────
+      - key: DISCOVERY_TARGET_LEADS
+        value: "10"
+      - key: DISCOVERY_MAX_QUERIES
+        value: "6"
+      - key: DISCOVERY_STALE_JOB_MINUTES
+        value: "10"
+      - key: SCRAPER_CONCURRENCY
+        value: "4"
+      - key: SCRAPER_PAGE_TIMEOUT_MS
+        value: "6000"
+      - key: ENRICHMENT_CONCURRENCY
+        value: "4"
+      - key: LINKEDIN_TARGET_LEADS
+        value: "5"
+      - key: LINKEDIN_MAX_QUERIES
+        value: "4"
+      - key: BUYER_TARGET_LEADS
+        value: "5"
+      - key: BUYER_MAX_QUERIES
+        value: "3"
+      - key: DISCOVERY_DIRECTORY_PAGES
+        value: "2"
+      - key: DISCOVERY_DIRECTORY_LINKS
+        value: "10"
+
+      # ── Search sources ───────────────────────────────────────────────────
+      - key: SEARCH_ENABLE_GOOGLE
+        value: "false"
+      - key: SEARCH_SOURCE_COOLDOWN_AFTER
+        value: "3"
+      - key: SEARCH_SOURCE_COOLDOWN_MS
+        value: "240000"
+      - key: SCRAPER_DELAY_MS
+        value: "2000"
+      - key: SERPER_API_KEY
+        sync: false
+      - key: BRAVE_API_KEY
+        sync: false
+
+      # ── Scheduler ────────────────────────────────────────────────────────
+      - key: CRON_SCHEDULE
+        value: 0 2 * * *
+
+      # ── Phase 2: outreach ────────────────────────────────────────────────
+      - key: OUTREACH_AI_PROVIDER
+        value: auto
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: MAIL_FROM_EMAIL
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: lead Pulse AI
+      - key: MAIL_REPLY_TO
+        sync: false
+      - key: OUTREACH_DRY_RUN
+        value: "false"
+      - key: OUTREACH_DAILY_SEND_LIMIT
+        value: "200"
+      - key: OUTREACH_BULK_SEND_LIMIT
+        value: "50"
+      - key: OUTREACH_SCHEDULER_ENABLED
+        value: "true"
+      - key: OUTREACH_SCHEDULER_INTERVAL_MS
+        value: "30000"
+      # Unsubscribe links must resolve for the recipient, so this has to be the
+      # public Render URL. fromService reads it back from this service itself.
+      - key: APP_BASE_URL
+        fromService:
+          type: web
+          name: leadpulse-ai
+          envVarKey: RENDER_EXTERNAL_URL

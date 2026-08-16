@@ -1,0 +1,7 @@
+# Files the Linux container executes must be stored and checked out with LF.
+# A CRLF entrypoint fails at exec with "bad interpreter: /usr/bin/bash^M",
+# which surfaces on Render as a container that exits before it logs anything.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
