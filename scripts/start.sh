@@ -8,6 +8,11 @@ set -euo pipefail
 DB_PATH="${SQLITE_PATH:-/var/data/database.sqlite}"
 mkdir -p "$(dirname "$DB_PATH")"
 
+# Winston's file transports use paths relative to the working directory and do
+# not create it themselves, so without this they fail open and only the console
+# transport survives.
+mkdir -p /app/backend/logs
+
 echo "[boot] Data directory: $(dirname "$DB_PATH")"
 
 echo "[boot] Starting Scrapling sidecar..."

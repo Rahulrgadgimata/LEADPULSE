@@ -123,4 +123,36 @@ npm run dev
 
 ---
 
+## ☁️ Deployment (Render)
+
+Live: **https://leadpulse-ai.onrender.com**
+
+One Docker web service runs the Node API, the static frontend it serves, and
+the Python Scrapling sidecar in the same container — they talk over `127.0.0.1`,
+so they have to share a network namespace.
+
+```bash
+# Push local .env values (plus the production overrides) to the service.
+RENDER_API_KEY=rnd_xxx RENDER_SERVICE_ID=srv_xxx node scripts/render-sync-env.js
+```
+
+Pushing to `main` triggers a deploy automatically. [render.yaml](render.yaml)
+is the blueprint for recreating the service from scratch; secrets in it are
+`sync: false`, so nothing sensitive is committed.
+
+### Free-tier caveats
+
+The free instance type cannot mount a disk, so `/var/data/database.sqlite`
+lives in the container filesystem and is **wiped on every deploy, restart, and
+spin-down** — registered users, discovered leads and sent-message history do not
+survive. Free instances also sleep after 15 minutes idle (~50s cold start), and
+a discovery run in progress dies with them.
+
+To make storage durable: upgrade the service to the `starter` plan and uncomment
+the `disk:` block in [render.yaml](render.yaml) (or attach a 1GB disk at
+`/var/data` in the dashboard). `SQLITE_PATH` already points inside that mount,
+so no other change is needed.
+
+---
+
 *Built by Asan Innovators © 2026*
