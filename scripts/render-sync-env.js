@@ -71,6 +71,10 @@ const overrides = {
   SCRAPLING_PYTHON: 'python3',
 };
 
+// Render injects PORT itself and routes to whatever the service binds. Copying
+// the local PORT over that makes the two disagree, so it never gets synced.
+const NEVER_SYNC = new Set(['PORT']);
+
 function readDotEnv() {
   const vars = {};
   const envPath = path.join(__dirname, '../.env');
@@ -106,6 +110,8 @@ function readDotEnv() {
   // .env that almost certainly points at localhost.
   const publicUrl = service && service.serviceDetails && service.serviceDetails.url;
   if (publicUrl) merged.APP_BASE_URL = publicUrl.replace(/\/$/, '');
+
+  for (const key of NEVER_SYNC) delete merged[key];
 
   const payload = Object.entries(merged).map(([key, value]) => ({ key, value: String(value) }));
   await api('PUT', `/v1/services/${serviceId}/env-vars`, payload);

@@ -34,8 +34,8 @@ services:
       # ── Server ───────────────────────────────────────────────────────────
       - key: NODE_ENV
         value: production
-      - key: PORT
-        value: "3000"
+      # PORT is deliberately absent: Render injects its own (10000) and routes
+      # to whatever the service binds. Setting it here makes the two disagree.
       # Render terminates TLS at its edge, so the client IP arrives in
       # X-Forwarded-For. Without this every request rate-limits as one caller.
       - key: TRUST_PROXY
