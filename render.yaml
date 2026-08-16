@@ -128,6 +128,12 @@ services:
         value: python3
       - key: SCRAPLING_CONCURRENCY
         value: "2"
+      # Scrapling escalates a failed fetch to a Playwright browser. That is the
+      # same memory problem as SCRAPER_BROWSER_ENABLED, one process over — and
+      # the launch outlasts the caller's timeout, so every blocked query cost
+      # 90s and returned nothing. Off here; TLS impersonation still runs.
+      - key: SCRAPLING_STEALTH_ENABLED
+        value: "false"
 
       # ── Discovery volume & pacing ────────────────────────────────────────
       - key: DISCOVERY_TARGET_LEADS

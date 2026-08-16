@@ -76,6 +76,7 @@ const overrides = {
   // has memory to spare, so these are set here rather than in .env.
   NODE_OPTIONS: '--max-old-space-size=320',
   SCRAPER_BROWSER_ENABLED: 'false',
+  SCRAPLING_STEALTH_ENABLED: 'false',
   SCRAPER_CONCURRENCY: '2',
   ENRICHMENT_CONCURRENCY: '2',
   SCRAPLING_CONCURRENCY: '2',

@@ -41,6 +41,11 @@ MAX_HTML_CHARS = int(os.environ.get("SCRAPLING_MAX_HTML_CHARS", str(2_000_000)))
 # spawn a dozen Chromium instances at once and melt the machine.
 FETCH_SLOTS = threading.Semaphore(int(os.environ.get("SCRAPLING_CONCURRENCY", "3")))
 STEALTH_SLOTS = threading.Semaphore(int(os.environ.get("SCRAPLING_STEALTH_CONCURRENCY", "1")))
+# Stealth mode drives a real Playwright browser, so it costs a few hundred MB on
+# top of this process. On a small container that is the difference between a slow
+# search and an OOM kill, and the launch alone can outlast the caller's timeout.
+# Turning it off leaves TLS impersonation, which needs no browser.
+STEALTH_ENABLED = os.environ.get("SCRAPLING_STEALTH_ENABLED", "true").strip().lower() != "false"
 
 
 def _html_of(page: Any) -> str:
@@ -63,6 +68,17 @@ def _status_of(page: Any) -> int:
 def fetch_page(url: str, mode: str = "fetcher", timeout_ms: int = 30000) -> dict:
     """Fetch a URL with Scrapling. Returns {ok, status, url, html, error?}."""
     mode = (mode or DEFAULT_MODE).lower().strip()
+
+    if mode == "stealth" and not STEALTH_ENABLED:
+        return {
+            "ok": False,
+            "status": 0,
+            "url": url,
+            "html": "",
+            "mode": mode,
+            "error": "stealth_disabled",
+        }
+
     timeout_s = max(5, min(90, int(timeout_ms / 1000) or 30))
     slot = STEALTH_SLOTS if mode == "stealth" else FETCH_SLOTS
 
@@ -429,7 +445,10 @@ def search_engine(query: str, engine: str = "brave", limit: int = 10, mode: str 
     # nothing — the single largest avoidable cost in a blocked run.
     attempts = [(u, mode or "fetcher") for u in urls]
     if mode != "stealth":
-        attempts.append((urls[0], "stealth"))
+        # Skip the escalation entirely when stealth is off, rather than queueing
+        # a browser attempt that can only come back "stealth_disabled".
+        if STEALTH_ENABLED:
+            attempts.append((urls[0], "stealth"))
     else:
         attempts = [(u, "stealth") for u in urls]
 
