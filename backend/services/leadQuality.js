@@ -1,5 +1,7 @@
 const logger = require('../utils/logger');
 const { isNonProspect, isMegaCorp } = require('./discovery/collectors/domainFilter');
+const config = require('../config/env');
+const { locationMatchesGeographies } = require('./discovery/geoMatch');
 
 /**
  * Intake filter — keep convertible companies, skip junk and mega-giants.
@@ -8,11 +10,15 @@ const { isNonProspect, isMegaCorp } = require('./discovery/collectors/domainFilt
  * the company is a real SMB/startup. Only clear non-prospects are removed.
  */
 class LeadQuality {
-  static isBestProspect(item) {
-    return this.evaluate(item).ok;
+  static isBestProspect(item, icp) {
+    return this.evaluate(item, icp).ok;
   }
 
-  static evaluate(item) {
+  /**
+   * @param {object} item  candidate lead
+   * @param {object} [icp] when supplied, the geography filter applies
+   */
+  static evaluate(item, icp) {
     if (!item?.company_name) return fail('missing name');
 
     const name = String(item.company_name).trim();
@@ -44,14 +50,28 @@ class LeadQuality {
       return fail(`too large to convert cold (${size} employees)`);
     }
 
+    // Geography. Only a location that is known AND contradicts the ICP is
+    // rejected: locationMatchesGeographies returns null when nothing was
+    // scraped, and dropping those would discard most of the pipeline, since
+    // location is often only resolved later during enrichment.
+    if (icp && config.LEAD_GEO_STRICT) {
+      const geographies = parseList(icp.geographies);
+      if (geographies.length > 0) {
+        const verdict = locationMatchesGeographies(item.company_location, geographies);
+        if (verdict === false) {
+          return fail(`outside target geography (${item.company_location})`);
+        }
+      }
+    }
+
     return { ok: true };
   }
 
-  static filterBest(items) {
+  static filterBest(items, icp) {
     const kept = [];
     let dropped = 0;
     for (const item of items || []) {
-      const verdict = this.evaluate(item);
+      const verdict = this.evaluate(item, icp);
       if (verdict.ok) kept.push(item);
       else {
         dropped++;
@@ -62,6 +82,18 @@ class LeadQuality {
       logger.info(`LeadQuality: kept ${kept.length} convertible leads, skipped ${dropped} (giants/junk)`);
     }
     return kept;
+  }
+}
+
+/** ICP list columns are stored as JSON text. Matches scoring.js's helper. */
+function parseList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
   }
 }
 

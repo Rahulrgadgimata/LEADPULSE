@@ -178,8 +178,13 @@ class BuyerCollector {
     return {
       company_name: companyName.slice(0, 120),
       company_website: null,
-      company_industry: parseList(icp.industries)[0] || null,
-      company_location: parseList(icp.geographies)[0] || null,
+      // Industry and location are left null rather than copied from the ICP.
+      // Filling them in from the target profile asserted what was being looked
+      // for, not what was found: every buyer lead then claimed to sit in the
+      // ICP's geography, which handed it the scoring geography bonus and made
+      // the location filter unable to tell a real match from an assumed one.
+      company_industry: null,
+      company_location: null,
       company_description: snippet.slice(0, 400) || null,
       contact_name: contactName ? contactName.slice(0, 80) : null,
       contact_title: contactTitle

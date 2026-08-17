@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const { query } = require('../config/database');
 const GroqClient = require('./groqClient');
 const Lead = require('../models/Lead');
+const { locationMatchesGeographies } = require('./discovery/geoMatch');
 const ScoreHistory = require('../models/ScoreHistory');
 const Signal = require('../models/Signal');
 const ICP = require('../models/ICP');
@@ -183,11 +184,19 @@ class ScoringService {
       score += 10; // unknown size OK for startups
     }
 
+    // Geography. Substring comparison used to be the test here, which both
+    // missed every city ("Austin, TX" against "United States") and matched on
+    // fragments, so the bonus landed close to at random. geoMatch resolves
+    // cities, states and country aliases instead.
+    //
+    // A contradiction is penalised rather than merely unrewarded: enrichment
+    // can resolve a location after the intake filter has already passed the
+    // lead, and without a penalty an out-of-region company scored the same as
+    // one whose location was simply never found.
     const geographies = parseList(icp.geographies);
-    const location = String(lead.company_location || '').toLowerCase();
-    if (location && geographies.some(g => location.includes(String(g).toLowerCase()))) {
-      score += 25;
-    }
+    const geoVerdict = locationMatchesGeographies(lead.company_location, geographies);
+    if (geoVerdict === true) score += 25;
+    else if (geoVerdict === false) score -= 30;
 
     return Math.max(0, Math.min(100, Math.round(score)));
   }

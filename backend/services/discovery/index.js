@@ -180,7 +180,9 @@ class DiscoveryService {
       });
 
       // Intake gate: only best convertible prospects enter enrich + score.
-      const allDiscovered = LeadQuality.filterBest(rawDiscovered);
+      // The ICP is passed so the geography filter applies here, at the one
+      // point that sees every collector's output.
+      const allDiscovered = LeadQuality.filterBest(rawDiscovered, icp);
       logger.info(
         `Discovery collected ${rawDiscovered.length} raw → ${allDiscovered.length} best leads: ${JSON.stringify(perSource)}`
       );

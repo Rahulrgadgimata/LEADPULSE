@@ -180,8 +180,17 @@ module.exports = {
   BUYER_MAX_QUERIES: Math.min(parseInt(process.env.BUYER_MAX_QUERIES) || 3, 3),
 
   // Intake quality: only prospects with website or LinkedIn company page enter.
-  LEAD_QUALITY_MIN_SCORE: parseInt(process.env.LEAD_QUALITY_MIN_SCORE) || 52,
-  LEAD_QUALITY_DROP_WEAK_ICP: process.env.LEAD_QUALITY_DROP_WEAK_ICP !== 'false',
+  // LEAD_QUALITY_MIN_SCORE and LEAD_QUALITY_DROP_WEAK_ICP used to live here.
+  // Both were read by nothing: the intake rules they described were
+  // reimplemented as explicit checks in leadQuality.evaluate(), and the knobs
+  // were left behind reading as though they still tuned the filter.
+
+  // Drop a lead whose location is known and falls outside the ICP's
+  // geographies. A lead with no location survives either way — location is
+  // often only resolved during enrichment, so rejecting unknowns would discard
+  // most of the pipeline. Set false to keep out-of-region leads and rely on the
+  // scoring penalty alone.
+  LEAD_GEO_STRICT: process.env.LEAD_GEO_STRICT !== 'false',
 
   // X / Twitter search paging (each page costs API quota).
   TWITTER_MAX_PAGES: parseInt(process.env.TWITTER_MAX_PAGES) || 3,

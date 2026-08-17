@@ -9,6 +9,7 @@ const { isNonProspect, isMegaCorp, registrableName } = require('./domainFilter')
 const { mapWithConcurrency } = require('../../../utils/concurrency');
 const LeadQuality = require('../../leadQuality');
 const scrapling = require('../../scraplingClient');
+const geoMatch = require('../geoMatch');
 
 /**
  * Discovers convertible companies matching an ICP by searching the public web.
@@ -203,7 +204,42 @@ class WebScraper {
 
     if (industries.length === 0 && keywords.length === 0) return [];
 
-    const geo = geographies[0] || '';
+    // One ordered list per geography, then interleaved. Building a single list
+    // meant the first geography's city queries filled the whole budget
+    // (DISCOVERY_MAX_QUERIES is capped at 6) and every later geography was cut
+    // off entirely — an ICP targeting "United States, India" searched only New
+    // York and San Francisco and returned nothing Indian.
+    const targets = geographies.length > 0 ? geographies : [''];
+    const perGeography = targets.map(geo =>
+      this._queriesForGeography(geo, { industries, keywords, jobTitles })
+    );
+
+    const queries = [];
+    const seen = new Set();
+    for (let rank = 0; queries.length < maxQueries; rank++) {
+      let advanced = false;
+      for (const list of perGeography) {
+        if (rank >= list.length) continue;
+        advanced = true;
+        const query = list[rank];
+        const key = query.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        queries.push(query);
+        if (queries.length >= maxQueries) break;
+      }
+      if (!advanced) break;
+    }
+
+    return queries;
+  }
+
+  /**
+   * The query list for a single geography, best-yield first. The caller
+   * interleaves these across geographies, so ordering within one list decides
+   * what survives the query budget.
+   */
+  static _queriesForGeography(geo, { industries, keywords, jobTitles }) {
     const queries = [];
     const seen = new Set();
 
@@ -222,7 +258,7 @@ class WebScraper {
       'software startup', 'saas startup', 'bootstrapped company', 'series a startup'
     ];
 
-    const cities = this._citiesFor(geographies);
+    const cities = this._citiesFor(geo ? [geo] : []);
 
     // 1. Listing queries first — they are the highest-yield queries available.
     // Search engines answer these with "Top 30 <industry> companies in <city>"
@@ -275,28 +311,19 @@ class WebScraper {
       add(industries[0] || keywords[0], 'SME', title, geo);
     }
 
-    // 7. Secondary geos.
-    for (const extraGeo of geographies.slice(1, 3)) {
-      for (const industry of industries.slice(0, 2)) {
-        add(industry, 'startup', extraGeo);
-      }
-    }
-
-    return queries.slice(0, maxQueries);
+    // Secondary geographies used to be appended here, where the query budget
+    // never reached them. _buildQueries now interleaves whole per-geography
+    // lists instead, so every target gets a share of the budget.
+    return queries;
   }
 
   /**
    * Major business cities for a geography, used to widen the candidate pool.
-   * Unknown geographies simply contribute no city queries.
+   * A geography that names no known country falls back to itself, so an ICP
+   * targeting a city or region directly still produces city-scoped queries.
    */
   static _citiesFor(geographies) {
-    const cities = [];
-    for (const geo of geographies) {
-      const key = String(geo).trim().toLowerCase();
-      const known = CITY_HINTS[key];
-      if (known) cities.push(...known);
-    }
-    return [...new Set(cities)];
+    return geoMatch.citiesFor(geographies);
   }
 
   /**
@@ -376,25 +403,5 @@ class WebScraper {
   }
 }
 
-// Business hubs per geography. National queries converge on the same handful of
-// large companies, so city-scoped variants are what actually grow the pool.
-const CITY_HINTS = {
-  india: ['Bangalore', 'Mumbai', 'Delhi NCR', 'Pune', 'Hyderabad', 'Chennai', 'Gurugram', 'Noida'],
-  'united states': ['New York', 'San Francisco', 'Austin', 'Chicago', 'Boston', 'Seattle', 'Atlanta'],
-  usa: ['New York', 'San Francisco', 'Austin', 'Chicago', 'Boston', 'Seattle', 'Atlanta'],
-  us: ['New York', 'San Francisco', 'Austin', 'Chicago', 'Boston', 'Seattle'],
-  'united kingdom': ['London', 'Manchester', 'Edinburgh', 'Birmingham', 'Leeds'],
-  uk: ['London', 'Manchester', 'Edinburgh', 'Birmingham', 'Leeds'],
-  canada: ['Toronto', 'Vancouver', 'Montreal', 'Calgary'],
-  australia: ['Sydney', 'Melbourne', 'Brisbane', 'Perth'],
-  germany: ['Berlin', 'Munich', 'Frankfurt', 'Hamburg'],
-  france: ['Paris', 'Lyon', 'Toulouse'],
-  netherlands: ['Amsterdam', 'Rotterdam', 'Utrecht'],
-  singapore: ['Singapore'],
-  uae: ['Dubai', 'Abu Dhabi'],
-  'united arab emirates': ['Dubai', 'Abu Dhabi'],
-  japan: ['Tokyo', 'Osaka'],
-  brazil: ['Sao Paulo', 'Rio de Janeiro'],
-};
 
 module.exports = WebScraper;
