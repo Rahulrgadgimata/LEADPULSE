@@ -19,11 +19,15 @@ const scrapling = require('../../scraplingClient');
  * needed to reach them — none of which required LinkedIn in the first place.
  */
 
-// Ordered by how likely each is to carry named leadership.
-const TEAM_PATHS = [
-  '/team', '/about', '/about-us', '/leadership', '/our-team', '/company/team',
-  '/management', '/founders', '/people', '/who-we-are', '/company/leadership'
-];
+/**
+ * Ordered by how likely each is to carry named leadership, and deliberately
+ * short: every path is a live page fetch through the Scrapling sidecar, and
+ * enrichment already fetches six pages per lead of its own. The original
+ * eleven-path list ran a 512Mi instance out of memory mid-run — which, with no
+ * durable disk, also wiped the database. In testing, every buyer that was found
+ * came from one of these five.
+ */
+const TEAM_PATHS = ['/about-us', '/about', '/team', '/leadership', '/our-team'];
 
 // Seniority worth contacting. Ordered: earlier entries win when one page names
 // several people, so a CTO outranks a marketing manager for a technical pitch.

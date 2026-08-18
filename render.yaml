@@ -145,11 +145,11 @@ services:
       # deadline between queries and stop early. That is what allows every
       # source to be scraped properly here without a run growing unbounded.
       #
-      # Memory, not time, is the binding constraint on this instance type — the
-      # container was OOM-killed twice at 512Mi — so the *concurrency* settings
-      # below stay low while the volume targets go up. Peak memory tracks how
-      # many pages are held at once, which concurrency governs; the targets only
-      # lengthen the run.
+      # Memory, not time, is the binding constraint on this instance type. A run
+      # at 30 leads OOM-killed the container mid-enrichment and, with no disk,
+      # took the database with it — so both the concurrency and the volume are
+      # held down here, well under what a dev machine runs. Raise them only
+      # alongside the `disk:` block and a paid plan.
       - key: DISCOVERY_RUN_BUDGET_MS
         value: "600000"
       - key: DISCOVERY_COLLECT_BUDGET_RATIO
@@ -161,9 +161,9 @@ services:
       - key: DISCOVERY_QUEUE_LIMIT
         value: "5"
       - key: DISCOVERY_TARGET_LEADS
-        value: "30"
+        value: "15"
       - key: DISCOVERY_MAX_QUERIES
-        value: "14"
+        value: "10"
       - key: DISCOVERY_STALE_JOB_MINUTES
         value: "12"
       # Halved from 4: each parallel worker holds a page of scraped HTML, and
@@ -175,17 +175,17 @@ services:
       - key: ENRICHMENT_CONCURRENCY
         value: "2"
       - key: LINKEDIN_TARGET_LEADS
-        value: "15"
-      - key: LINKEDIN_MAX_QUERIES
         value: "8"
+      - key: LINKEDIN_MAX_QUERIES
+        value: "5"
       - key: BUYER_TARGET_LEADS
-        value: "12"
+        value: "8"
       - key: BUYER_MAX_QUERIES
-        value: "6"
-      - key: DISCOVERY_DIRECTORY_PAGES
         value: "4"
+      - key: DISCOVERY_DIRECTORY_PAGES
+        value: "3"
       - key: DISCOVERY_DIRECTORY_LINKS
-        value: "20"
+        value: "15"
       # A freshly saved ICP is protected from deletion for an hour and wins the
       # active-target fallback. The browser also keeps a copy and restores it if
       # this instance loses the database, which a free instance does on every

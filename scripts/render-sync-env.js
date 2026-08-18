@@ -86,14 +86,14 @@ const overrides = {
   // these only lengthen the run, but a dev machine is sized for more of both and
   // syncing its numbers straight onto the free instance is how it got OOM-killed
   // before. The run budget bounds the job either way.
-  DISCOVERY_TARGET_LEADS: '30',
-  DISCOVERY_MAX_QUERIES: '14',
-  LINKEDIN_TARGET_LEADS: '15',
-  LINKEDIN_MAX_QUERIES: '8',
-  BUYER_TARGET_LEADS: '12',
-  BUYER_MAX_QUERIES: '6',
-  DISCOVERY_DIRECTORY_PAGES: '4',
-  DISCOVERY_DIRECTORY_LINKS: '20',
+  DISCOVERY_TARGET_LEADS: '15',
+  DISCOVERY_MAX_QUERIES: '10',
+  LINKEDIN_TARGET_LEADS: '8',
+  LINKEDIN_MAX_QUERIES: '5',
+  BUYER_TARGET_LEADS: '8',
+  BUYER_MAX_QUERIES: '4',
+  DISCOVERY_DIRECTORY_PAGES: '3',
+  DISCOVERY_DIRECTORY_LINKS: '15',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying
