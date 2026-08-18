@@ -12,7 +12,11 @@ const router = express.Router();
 // do nothing about.
 router.post('/run/:icpId', async (req, res) => {
   try {
-    const job = await DiscoveryService.run(req.params.icpId, 'manual');
+    // Only a deliberate press of Discover Leads supersedes a run in progress.
+    // The dashboard also starts a run by itself after an ICP is saved, and that
+    // must never kill a run the user is watching — it queues instead.
+    const auto = String(req.query.auto || req.body?.auto || '') === 'true';
+    const job = await DiscoveryService.run(req.params.icpId, auto ? 'auto' : 'manual');
 
     const startsInMin = Math.ceil((job.startsInMs || 0) / 60000);
     let message;

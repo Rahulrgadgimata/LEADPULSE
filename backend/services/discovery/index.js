@@ -692,14 +692,25 @@ class DiscoveryService {
         }
 
         if (isNew) {
+          // Cheap geography check first. Enrichment is the most expensive step
+          // in a run — several page fetches per lead — and a run for US/UK
+          // targets spent all of it on fourteen companies it then deleted,
+          // because the gate only ran afterwards. Anything already placeable
+          // outside the target is dropped here instead: a foreign address from
+          // the collector, or a country-coded domain, both of which are free to
+          // read. A lead whose location is merely *unknown* still goes through
+          // enrichment, which is what resolves most of them.
+          const early = this._checkGeography(lead.id, icp, { onlyIfKnown: true });
+          if (!early.ok) {
+            stats.outsideGeography++;
+            return;
+          }
+
           await EnrichmentService.enrich(lead.id);
 
-          // Geography is enforced here, not at intake: enrichment is what
-          // resolves an address, and a lead's location is usually unknown until
-          // it has run. Checking earlier meant "unknown" had to be allowed
-          // through, which is why targeting a country still returned companies
-          // from everywhere — news-derived leads never carry an address, so
-          // they passed unchecked while located web leads were filtered.
+          // Re-check with everything enrichment resolved. Most leads reach this
+          // point with no location at all, so this is where a news-derived lead
+          // is finally placed.
           const verdict = this._checkGeography(lead.id, icp);
           if (!verdict.ok) {
             stats.outsideGeography++;
@@ -780,7 +791,14 @@ class DiscoveryService {
    * from elsewhere is worse than a shorter list. Set LEAD_GEO_STRICT=false to
    * keep them and rely on the scoring penalty instead.
    */
-  static _checkGeography(leadId, icp) {
+  /**
+   * @param {object} [opts]
+   * @param {boolean} [opts.onlyIfKnown] pass before enrichment: reject only a
+   *   lead that can already be placed *outside* the target. A lead whose
+   *   location is simply undetermined passes, because enrichment is what
+   *   resolves most of them — rejecting unknowns here would empty the pipeline.
+   */
+  static _checkGeography(leadId, icp, opts = {}) {
     const geographies = parseIcpList(icp.geographies);
     if (geographies.length === 0) return { ok: true };
 
@@ -795,6 +813,14 @@ class DiscoveryService {
     } catch (e) { /* leave as text; resolveLocation tolerates it */ }
 
     const verdict = geoMatch.leadMatchesGeographies(parsed, geographies);
+
+    // "Could not be determined" is not evidence of being outside the target.
+    // Before enrichment that is the common case, so it must not count as a
+    // rejection — only a location that resolved and disagrees does.
+    if (opts.onlyIfKnown && !verdict.ok && !verdict.location) {
+      return { ok: true, deferred: true };
+    }
+
     if (verdict.ok) {
       // Record an inferred location so the dashboard shows where a lead is and
       // the scorer can credit the geography match.

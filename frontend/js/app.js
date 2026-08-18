@@ -195,9 +195,11 @@ const App = {
     await this.refreshLeadsFromBackend(icpData?.id);
     await this.refreshRadarStream();
 
-    // If no leads exist for this new ICP yet, run discovery automatically for this target
+    // If no leads exist for this new ICP yet, run discovery for it. Marked
+    // automatic: the user asked to save an ICP, not to abandon a run that is
+    // already in flight, so this one queues rather than superseding it.
     if (this.allLeads.length === 0 && icpData?.id) {
-      await this.triggerDiscoveryPipeline();
+      await this.triggerDiscoveryPipeline({ auto: true });
     }
   },
 
@@ -596,7 +598,7 @@ const App = {
   /**
    * Real-time Multi-Source Discovery Pipeline Execution
    */
-  async triggerDiscoveryPipeline() {
+  async triggerDiscoveryPipeline({ auto = false } = {}) {
     const toast = document.getElementById('discovery-toast');
     const statusText = document.getElementById('discovery-status-text');
     const bar = document.getElementById('discovery-bar');
@@ -621,11 +623,14 @@ const App = {
 
     try {
       // Call backend discovery execution endpoint
-      const response = await fetch(`${this.API_BASE}/api/discovery/run/${encodeURIComponent(icpId)}`, {
-        method: 'POST',
-        headers: headers,
-        body: JSON.stringify(window.ACTIVE_ICP || {})
-      });
+      const response = await fetch(
+        `${this.API_BASE}/api/discovery/run/${encodeURIComponent(icpId)}${auto ? '?auto=true' : ''}`,
+        {
+          method: 'POST',
+          headers: headers,
+          body: JSON.stringify(window.ACTIVE_ICP || {})
+        }
+      );
 
       const data = await response.json();
 
