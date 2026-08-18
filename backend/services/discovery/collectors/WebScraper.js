@@ -338,6 +338,11 @@ class WebScraper {
    * Never throws: an unreachable page degrades to search-result data only.
    */
   static async _profile(candidate) {
+    // Profiling is a page fetch per candidate and can run for a minute or more
+    // over a full list. A cancelled run must not keep paying for it — the user
+    // is waiting on the run that replaced this one.
+    if (runBudget.expired()) return { ...candidate, fetched: false };
+
     try {
       let html = null;
       let contentType = 'text/html';

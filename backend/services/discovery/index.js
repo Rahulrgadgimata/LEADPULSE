@@ -63,6 +63,12 @@ const queue = [];              // [{ jobId, icpId, icpName, enqueuedAt }]
 let activeRun = null;          // { jobId, icpId }
 let nextRunAllowedAt = 0;      // cooldown expiry after the previous run
 let pumpTimer = null;
+// Set while a run is being abandoned to make room for a user-requested one.
+// The cooldown exists to protect the *next* run from the previous run's
+// throttling; a run the user just cancelled did not finish spending that
+// budget, and making them wait five minutes for a run they explicitly asked
+// for is the opposite of what the button means.
+let preempting = false;
 
 class DiscoveryService {
   /**
@@ -78,17 +84,34 @@ class DiscoveryService {
     // placeholder the UI sent.
     const icp = await this._resolveIcp(icpId);
 
-    // Repeated clicks (and the dashboard's auto-run) must not stack up runs for
-    // the same target: attach to the one already in flight or waiting.
+    // A run already working on this exact target is what the user is asking
+    // for, so join it rather than restarting it from zero.
     const active = this._findActiveJob(icp.id);
-    if (active) {
-      logger.info(`Discovery for "${icp.name}" already ${active.status}; attaching to job ${active.id}.`);
+    if (active && active.status === 'running') {
+      logger.info(`Discovery for "${icp.name}" already running; attaching to job ${active.id}.`);
+      return {
+        jobId: active.id,
+        state: 'running',
+        attached: true,
+        position: 0,
+        startsInMs: 0
+      };
+    }
+
+    // Anything else in flight is superseded. Pressing Discover Leads is a
+    // request for results now: waiting out another target's run, or the
+    // cooldown behind it, is a delay the user did not ask for and cannot act
+    // on. Manual runs therefore cancel what is there and take its place.
+    let preempted = false;
+    if (triggerType === 'manual') {
+      preempted = this._preemptFor(icp);
+    } else if (active) {
       return {
         jobId: active.id,
         state: active.status,
         attached: true,
         position: this._queuePosition(active.id),
-        startsInMs: active.status === 'queued' ? this._estimatedStartMs(active.id) : 0
+        startsInMs: this._estimatedStartMs(active.id)
       };
     }
 
@@ -120,9 +143,58 @@ class DiscoveryService {
       jobId,
       state,
       attached: false,
+      preempted,
       position: this._queuePosition(jobId),
-      startsInMs: state === 'queued' ? this._estimatedStartMs(jobId) : 0
+      // A preempted run is not waiting on a queue, it is waiting on the run it
+      // just cancelled to unwind — seconds, not the minutes the queue estimate
+      // would report.
+      startsInMs: state === 'queued' ? (preempted ? 0 : this._estimatedStartMs(jobId)) : 0
     };
+  }
+
+  /**
+   * Clear the way for a run the user just asked for.
+   *
+   * Cancels whatever is executing, drops anything waiting, and forgets the
+   * cooldown. The cancelled run unwinds cooperatively — collectors notice at
+   * their next budget check — so the new run starts from _pump() in the old
+   * run's `finally`, typically within a few seconds.
+   */
+  static _preemptFor(icp) {
+    const superseded = `Superseded by a new discovery run for "${icp.name}".`;
+    let stoppedSomething = false;
+
+    // Drop the waiting queue first, so nothing else claims the slot in between.
+    while (queue.length > 0) {
+      const dropped = queue.shift();
+      query(
+        `UPDATE discovery_jobs SET status = 'cancelled', failed_reason = ?, completed_at = ? WHERE id = ?`,
+        [superseded, new Date().toISOString(), dropped.jobId]
+      );
+      logger.info(`Discovery job ${dropped.jobId} cancelled: ${superseded}`);
+      stoppedSomething = true;
+    }
+
+    // The cooldown protects the next run from the previous one's throttling.
+    // A user asking for results now has decided that trade for themselves.
+    nextRunAllowedAt = 0;
+    if (pumpTimer) {
+      clearTimeout(pumpTimer);
+      pumpTimer = null;
+    }
+
+    if (activeRun) {
+      preempting = true;
+      query(
+        `UPDATE discovery_jobs SET status_text = ? WHERE id = ?`,
+        ['Stopping — superseded by a newer run.', activeRun.jobId]
+      );
+      logger.info(`Cancelling discovery job ${activeRun.jobId}: ${superseded}`);
+      runBudget.cancel();
+      stoppedSomething = true;
+    }
+
+    return stoppedSomething;
   }
 
   /**
@@ -170,6 +242,16 @@ class DiscoveryService {
       })
       .finally(() => {
         activeRun = null;
+        // A preempted run stopped early at the user's request, so it never
+        // spent the search-engine and AI budget the cooldown exists to let
+        // recover. Charging their new run five minutes for it would recreate
+        // exactly the wait they pressed the button to avoid.
+        if (preempting) {
+          preempting = false;
+          nextRunAllowedAt = 0;
+          this._pump();
+          return;
+        }
         // The cooldown is the point of the queue: back-to-back runs hit the
         // same search engines and AI quota that the previous run just drained.
         nextRunAllowedAt = Date.now() + config.DISCOVERY_COOLDOWN_MS;
@@ -395,13 +477,18 @@ class DiscoveryService {
 
       const stats = await this._processItems(allDiscovered, icp, updateProgress);
 
+      // Leads found before the stop are kept and scored, so a cancelled run
+      // still contributes what it had — it just says so rather than claiming
+      // to have finished the sweep.
+      const cancelled = runBudget.isCancelled();
       query(
-        `UPDATE discovery_jobs SET status = 'completed', progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
+        `UPDATE discovery_jobs SET status = ?, progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
         [
+          cancelled ? 'cancelled' : 'completed',
           // `created` counts rows inserted, but the geography gate deletes some
           // of them afterwards, so reporting it raw promised leads that are no
           // longer there. Report what the user will actually find.
-          `Completed: ${stats.created - stats.outsideGeography} new leads kept` +
+          `${cancelled ? 'Stopped early' : 'Completed'}: ${stats.created - stats.outsideGeography} new leads kept` +
           (stats.outsideGeography ? `, ${stats.outsideGeography} dropped outside target geography` : '') +
           (stats.duplicates ? `, ${stats.duplicates} duplicates` : '') +
           (stats.failed ? `, ${stats.failed} failed` : '') + '.',
@@ -555,6 +642,14 @@ class DiscoveryService {
       try {
         if (!item.company_name) {
           stats.failed++;
+          return;
+        }
+
+        // Enrichment is the long tail of a run — several page fetches per lead.
+        // A cancelled run skips the rest so the user's new run starts promptly;
+        // items already inserted keep whatever was resolved for them.
+        if (runBudget.isCancelled()) {
+          stats.skipped = (stats.skipped || 0) + 1;
           return;
         }
 

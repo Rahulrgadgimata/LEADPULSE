@@ -163,7 +163,7 @@ services:
       - key: DISCOVERY_QUEUE_LIMIT
         value: "5"
       - key: DISCOVERY_TARGET_LEADS
-        value: "8"
+        value: "10"
       - key: DISCOVERY_MAX_QUERIES
         value: "6"
       - key: DISCOVERY_STALE_JOB_MINUTES

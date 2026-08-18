@@ -3,6 +3,7 @@ const config = require('../../../config/env');
 const GroqClient = require('../../groqClient');
 const { collectWithConcurrency } = require('../../../utils/concurrency');
 const { isNonProspect, isMegaCorp } = require('./domainFilter');
+const runBudget = require('../runBudget');
 
 /**
  * Turns raw scraped pages into structured company leads using Groq.
@@ -21,6 +22,14 @@ class EntityExtractor {
    */
   static async extract(items, icp) {
     if (!items || items.length === 0) return [];
+
+    // Qualification is the most expensive step in a run — one AI call per
+    // batch, paced against a per-minute budget. A cancelled run stops here
+    // rather than spending that quota on results nobody is waiting for.
+    if (runBudget.isCancelled()) {
+      logger.info('EntityExtractor skipped: run cancelled.');
+      return [];
+    }
 
     if (!config.GROQ_API_KEY) {
       logger.warn('GROQ_API_KEY not set — cannot qualify candidates; falling back to conservative domain heuristics.');

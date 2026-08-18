@@ -113,32 +113,60 @@ class NewsMonitor {
   static _buildQueries(icp) {
     const industries = this._parseList(icp.industries);
     const keywords = this._parseList(icp.keywords);
-    const geo = this._parseList(icp.geographies)[0] || '';
+    const geographies = this._parseList(icp.geographies);
+
+    // One query list per geography, interleaved — the same shape WebScraper
+    // uses. Building a single list around geographies[0] meant an ICP targeting
+    // "United States, Canada, United Kingdom" only ever searched US news, while
+    // the geography gate downstream still discarded every non-US company the
+    // other collectors found. The run paid for those leads and then threw them
+    // away; now each target geography gets a share of the query budget.
+    const targets = geographies.length > 0 ? geographies : [''];
+
+    const perGeography = targets.map(geo => {
+      const list = [];
+      const local = new Set();
+      const add = (...parts) => {
+        const q = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+        if (!q || local.has(q.toLowerCase())) return;
+        local.add(q.toLowerCase());
+        list.push(q);
+      };
+
+      // Best-yield first: what survives the budget is decided by this order.
+      for (const industry of industries) {
+        add(industry, 'funding raises', geo);
+        add(industry, 'startup launch', geo);
+        add(industry, 'company', geo);
+      }
+      for (const keyword of keywords) {
+        add(keyword, 'company', geo);
+      }
+      for (const industry of industries.slice(0, 2)) {
+        for (const keyword of keywords.slice(0, 2)) {
+          add(industry, keyword, geo);
+        }
+      }
+      return list;
+    });
 
     const queries = [];
     const seen = new Set();
-    const add = (...parts) => {
-      const q = parts.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
-      if (!q || seen.has(q.toLowerCase())) return;
-      seen.add(q.toLowerCase());
-      queries.push(q);
-    };
-
-    for (const industry of industries) {
-      add(industry, 'company', geo);
-      add(industry, 'funding raises', geo);
-      add(industry, 'startup launch', geo);
-    }
-    for (const keyword of keywords) {
-      add(keyword, 'company', geo);
-    }
-    for (const industry of industries.slice(0, 2)) {
-      for (const keyword of keywords.slice(0, 2)) {
-        add(industry, keyword, geo);
+    for (let rank = 0; queries.length < config.NEWS_MAX_QUERIES; rank++) {
+      let advanced = false;
+      for (const list of perGeography) {
+        if (rank >= list.length) continue;
+        advanced = true;
+        const q = list[rank];
+        if (seen.has(q.toLowerCase())) continue;
+        seen.add(q.toLowerCase());
+        queries.push(q);
+        if (queries.length >= config.NEWS_MAX_QUERIES) break;
       }
+      if (!advanced) break;
     }
 
-    return queries.slice(0, config.NEWS_MAX_QUERIES);
+    return queries;
   }
 
   /**

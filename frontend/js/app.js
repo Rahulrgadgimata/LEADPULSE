@@ -633,14 +633,15 @@ const App = {
         throw new Error(data.error || `Failed to start discovery job (HTTP ${response.status})`);
       }
 
-      // The server queues rather than refuses: a run can be waiting behind
-      // another one, or behind the cooldown that follows it. Say so, instead of
-      // showing a progress bar that will sit at zero for minutes.
+      // Pressing the button supersedes whatever was in flight, so the only
+      // states it produces are "running" and "joined the run already working
+      // on this target". A brief 'queued' can still appear while the previous
+      // run unwinds.
       if (data.state === 'queued') {
-        if (titleText) titleText.textContent = 'Discovery queued';
-        if (statusText) statusText.textContent = this.queueMessage(data);
+        if (titleText) titleText.textContent = 'Starting discovery';
+        if (statusText) statusText.textContent = 'Stopping the previous run and starting yours...';
       } else if (data.attached) {
-        if (statusText) statusText.textContent = 'Discovery already running — following the existing run...';
+        if (statusText) statusText.textContent = 'Discovery is already running for this target — following it...';
       }
 
       const jobId = data.jobId;
@@ -675,11 +676,24 @@ const App = {
 
           const statusData = await statusRes.json();
 
-          // A queued run has no progress to report yet; show the wait instead.
+          // A queued run has no progress yet. After a click this only lasts
+          // as long as the previous run takes to unwind.
           if (statusData.state === 'queued') {
             if (bar) bar.style.width = '0%';
-            if (titleText) titleText.textContent = 'Discovery queued';
-            if (statusText) statusText.textContent = statusData.statusText || this.queueMessage(statusData);
+            if (titleText) titleText.textContent = 'Starting discovery';
+            if (statusText) statusText.textContent = 'Stopping the previous run and starting yours...';
+            return;
+          }
+
+          // Superseded by a newer run: stop following this one and let the
+          // newer run's own poller report progress.
+          if (statusData.state === 'cancelled') {
+            clearInterval(pollInterval);
+            await this.refreshLeadsFromBackend();
+            await this.refreshRadarStream();
+            toast.classList.add('hidden');
+            if (bar) bar.style.width = '0%';
+            if (titleText) titleText.textContent = 'Running Multi-Source AI Pipeline...';
             return;
           }
 
@@ -731,15 +745,6 @@ const App = {
       console.warn('Real-time API connection notice:', err.message);
       this.showDiscoveryConnectionError(toast, statusText, bar, err.message);
     }
-  },
-
-  /** Plain-language wait for a queued run. */
-  queueMessage(job) {
-    const minutes = Math.max(1, Math.ceil((job.startsInMs || 0) / 60000));
-    const ahead = job.queuePosition || 1;
-    return ahead > 1
-      ? `Waiting behind ${ahead - 1} other run${ahead === 2 ? '' : 's'} — starts in about ${minutes} min.`
-      : `Another run just finished. This one starts in about ${minutes} min, once the sources have cooled down.`;
   },
 
   /**

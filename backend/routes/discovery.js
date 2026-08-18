@@ -15,9 +15,17 @@ router.post('/run/:icpId', async (req, res) => {
     const job = await DiscoveryService.run(req.params.icpId, 'manual');
 
     const startsInMin = Math.ceil((job.startsInMs || 0) / 60000);
-    const message = job.state === 'running'
-      ? (job.attached ? 'Attached to the discovery run already in progress' : 'Discovery job started')
-      : `Queued behind ${job.position} run${job.position === 1 ? '' : 's'} — starts in about ${startsInMin} min`;
+    let message;
+    if (job.state === 'running') {
+      message = job.attached
+        ? 'Attached to the discovery run already in progress'
+        : 'Discovery job started';
+    } else if (job.preempted) {
+      // Not a queue wait: the run it replaced is unwinding, which takes seconds.
+      message = 'Stopping the previous run and starting yours';
+    } else {
+      message = `Queued behind ${job.position} run${job.position === 1 ? '' : 's'} — starts in about ${startsInMin} min`;
+    }
 
     res.status(202).json({ ...job, message });
   } catch (err) {

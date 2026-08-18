@@ -103,7 +103,7 @@ const overrides = {
   // Discovery volume, matching render.yaml rather than .env: a dev machine is
   // sized for far more, and syncing its numbers onto the free instance is what
   // OOM-killed it. Raise these together with the `disk:` block on a paid plan.
-  DISCOVERY_TARGET_LEADS: '8',
+  DISCOVERY_TARGET_LEADS: '10',
   DISCOVERY_MAX_QUERIES: '6',
   LINKEDIN_TARGET_LEADS: '5',
   LINKEDIN_MAX_QUERIES: '3',

@@ -22,6 +22,7 @@ const config = require('../../config/env');
  */
 
 let startedAt = 0;
+let cancelled = false;
 let hardDeadline = 0;
 let collectDeadline = 0;
 let collectWindowMs = 0;
@@ -34,6 +35,7 @@ function start(totalMs = config.DISCOVERY_RUN_BUDGET_MS) {
   hardDeadline = startedAt + totalMs;
   collectWindowMs = Math.round(totalMs * ratio);
   collectDeadline = startedAt + collectWindowMs;
+  cancelled = false;
   warnedCollect = false;
   warnedHard = false;
   logger.info(
@@ -45,6 +47,27 @@ function start(totalMs = config.DISCOVERY_RUN_BUDGET_MS) {
 function clear() {
   hardDeadline = 0;
   collectDeadline = 0;
+  cancelled = false;
+}
+
+/**
+ * Stop the current run at the next check.
+ *
+ * Pressing Discover Leads means "I want results for this target now", so a run
+ * already in flight is abandoned rather than queued behind. Cancellation is
+ * cooperative: every collector already tests the budget between queries, so
+ * making both deadlines report expired unwinds the run through the same path
+ * as running out of time. Requests already in flight finish on their own
+ * timeouts; nothing new is started.
+ */
+function cancel() {
+  if (cancelled) return;
+  cancelled = true;
+  logger.info('Discovery run cancelled — winding down so the next run can start.');
+}
+
+function isCancelled() {
+  return cancelled;
 }
 
 /**
@@ -58,6 +81,7 @@ function clear() {
  * run. Passing share=0.65 to the earlier phases leaves them the final third.
  */
 function collectExpired(share = 1) {
+  if (cancelled) return true;
   if (!collectDeadline) return false;
 
   const limit = share >= 1
@@ -77,6 +101,7 @@ const PRIMARY_SHARE = 0.65;
 
 /** True once even enrichment-time lookups must stop. */
 function expired() {
+  if (cancelled) return true;
   if (!hardDeadline) return false;
   const over = Date.now() >= hardDeadline;
   if (over && !warnedHard) {
@@ -95,5 +120,6 @@ function remainingMs() {
 }
 
 module.exports = {
-  start, clear, collectExpired, expired, collectRemainingMs, remainingMs, PRIMARY_SHARE
+  start, clear, cancel, isCancelled,
+  collectExpired, expired, collectRemainingMs, remainingMs, PRIMARY_SHARE
 };
