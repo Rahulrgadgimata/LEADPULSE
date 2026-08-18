@@ -35,6 +35,17 @@ const NON_PROSPECT_NAMES = new Set([
   'techpowerup', 'windowsforum', 'tomshardware', 'xda-developers', 'howtogeek',
   'geeksforgeeks', 'w3schools', 'tutorialspoint', 'javatpoint', 'coursera',
   'udemy', 'edx', 'khanacademy', 'byjus', 'unacademy',
+  // Tech trade press and "companies hiring in <city>" boards. These rank for
+  // exactly the queries the web collector runs and are usually US-based, so
+  // they survive a US geography filter that correctly drops the real foreign
+  // companies around them — a run for US SaaS returned three of these and one
+  // actual company.
+  'techbullion', 'techrseries', 'builtin', 'builtinnyc', 'builtinla',
+  'builtinchicago', 'builtinaustin', 'builtinboston', 'builtinsf',
+  'analyticsinsight', 'cxotoday', 'siliconindia', 'techrepublic', 'cio',
+  'informationweek', 'computerworld', 'techradar', 'engadget', 'gizmodo',
+  'mashable', 'readwrite', 'thenextweb', 'arstechnica', 'sifted', 'eu-startups',
+  'startupsavant', 'growthlist', 'failory', 'ventureradar',
   'runoob', 'programiz', 'freecodecamp', 'sitepoint', 'baeldung', 'hackernoon',
   'hashnode', 'dev', 'digitalocean',
   // Accelerator and marketplace directories. Their company lists rank first for
