@@ -445,15 +445,38 @@ function isUsefulEmail(email, host) {
   // the email pattern exactly, and a page's srcset is full of them. One was
   // imported as a company's contact address.
   if (ASSET_FILENAME.test(lower)) return false;
-  // Prefer emails on the company domain when known.
+
+  // An address on someone else's domain is someone else's address. Company
+  // pages link to customers, partners, agencies and case studies, so the first
+  // email in the body text is frequently not the company's own — an import of
+  // buttondown.com came back with contact@cssclub.nyc, a site they merely link
+  // to, presented as Buttondown's contact.
+  //
+  // The company's own domain is accepted, as are the free providers a small
+  // business legitimately runs on. Anything else is another company.
   if (host) {
     const domain = host.replace(/^www\./, '').toLowerCase();
-    if (lower.endsWith(`@${domain}`) || lower.includes(`@${domain.split('.').slice(-2).join('.')}`)) {
-      return true;
-    }
+    const base = domain.split('.').slice(-2).join('.');
+    const emailDomain = lower.split('@').pop();
+    if (!emailDomain) return false;
+
+    const onCompanyDomain = emailDomain === domain ||
+      emailDomain.endsWith(`.${base}`) ||
+      emailDomain === base;
+
+    if (!onCompanyDomain && !FREE_MAIL_DOMAINS.has(emailDomain)) return false;
   }
+
   return true;
 }
+
+// Small businesses genuinely run on these, so an address here is not evidence
+// that it belongs to a different company.
+const FREE_MAIL_DOMAINS = new Set([
+  'gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com',
+  'yahoo.com', 'yahoo.co.uk', 'yahoo.co.in', 'proton.me', 'protonmail.com',
+  'icloud.com', 'aol.com', 'zoho.com', 'gmx.com', 'mail.com', 'rediffmail.com'
+]);
 
 // An "address" whose domain part is really a file extension, or whose local
 // part is a size suffix rather than a name.
