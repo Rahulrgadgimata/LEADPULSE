@@ -398,8 +398,13 @@ class DiscoveryService {
       query(
         `UPDATE discovery_jobs SET status = 'completed', progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
         [
-          `Completed: ${stats.created} new leads, ${stats.duplicates} duplicates, ` +
-          `${stats.outsideGeography} outside target geography, ${stats.failed} failed.`,
+          // `created` counts rows inserted, but the geography gate deletes some
+          // of them afterwards, so reporting it raw promised leads that are no
+          // longer there. Report what the user will actually find.
+          `Completed: ${stats.created - stats.outsideGeography} new leads kept` +
+          (stats.outsideGeography ? `, ${stats.outsideGeography} dropped outside target geography` : '') +
+          (stats.duplicates ? `, ${stats.duplicates} duplicates` : '') +
+          (stats.failed ? `, ${stats.failed} failed` : '') + '.',
           new Date().toISOString(),
           jobId
         ]

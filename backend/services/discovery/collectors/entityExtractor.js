@@ -232,6 +232,11 @@ Return ONLY JSON: {"companies":[...]}`;
     if (name.split(/\s+/).length > 6) return false;
     if (!/[a-z0-9]/i.test(name)) return false;
     if (GENERIC_NAMES.test(name)) return false;
+    // Free web utilities rank well for "list of <industry> companies" queries
+    // and the model reads their page as a product, so a run targeting SaaS
+    // companies came back with "Online List Maker" and "List Maker" alongside
+    // the real ones. They describe a tool, not a company anyone can be sold to.
+    if (WEB_TOOL_NAMES.test(name)) return false;
     // Listicle/marketing leftovers.
     if (/\b(top \d+|best \d+|\d+ best|guide to|how to|vs\.?|review of|list of|companies in|services in)\b/i.test(name)) return false;
     return true;
@@ -291,6 +296,10 @@ Return ONLY JSON: {"companies":[...]}`;
     }
   }
 }
+
+// Names that describe a free online utility rather than a business.
+const WEB_TOOL_NAMES =
+  /\b(list|invoice|resume|cv|logo|qr|barcode|pdf|meme|word|text|image|photo|password|username|name|url|link|color|font|chart|graph|calendar|timer|counter)\s*(maker|generator|builder|creator|converter|editor|shortener|checker|tester|calculator)\b/i;
 
 // Page-furniture words that are never a company name.
 const GENERIC_NAMES = /^(home|homepage|about|about us|contact|contact us|welcome|login|sign in|index|untitled|error|page not found|community|forum|blog|news|careers|jobs|search|services|solutions|products|company|website|dashboard|portal|support|help)$/i;
