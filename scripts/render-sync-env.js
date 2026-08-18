@@ -74,26 +74,43 @@ const overrides = {
   // The container was OOM-killed (exit 137) twice mid-discovery, and because
   // the free plan has no disk, each kill also wiped the database. A dev machine
   // has memory to spare, so these are set here rather than in .env.
-  NODE_OPTIONS: '--max-old-space-size=320',
+  // 512Mi holds a Node process, a Python Scrapling sidecar and the run's
+  // working set. Runs at 30 and then 15 leads both ended with the container
+  // restarting mid-run, and with no disk each restart wiped the database — so
+  // everything below is sized for survival rather than throughput.
+  //
+  // The heap cap is the safety net, not the fix: it makes V8 collect garbage
+  // rather than grow until the kernel steps in, and leaves room for Python.
+  NODE_OPTIONS: '--max-old-space-size=256',
   SCRAPER_BROWSER_ENABLED: 'false',
   SCRAPLING_STEALTH_ENABLED: 'false',
-  SCRAPER_CONCURRENCY: '2',
-  ENRICHMENT_CONCURRENCY: '2',
-  SCRAPLING_CONCURRENCY: '2',
 
-  // Discovery volume, matching render.yaml rather than .env. Peak memory tracks
-  // how many pages are held at once — the concurrency settings above — while
-  // these only lengthen the run, but a dev machine is sized for more of both and
-  // syncing its numbers straight onto the free instance is how it got OOM-killed
-  // before. The run budget bounds the job either way.
-  DISCOVERY_TARGET_LEADS: '15',
-  DISCOVERY_MAX_QUERIES: '10',
-  LINKEDIN_TARGET_LEADS: '8',
-  LINKEDIN_MAX_QUERIES: '5',
-  BUYER_TARGET_LEADS: '8',
-  BUYER_MAX_QUERIES: '4',
-  DISCOVERY_DIRECTORY_PAGES: '3',
-  DISCOVERY_DIRECTORY_LINKS: '15',
+  // Serial. Peak memory is set by how many scraped pages are held at once, and
+  // concurrency is the direct multiplier on that — the one lever that cuts the
+  // peak without giving up a source. A run takes longer instead, which the
+  // ten-minute budget already allows for.
+  SCRAPER_CONCURRENCY: '1',
+  ENRICHMENT_CONCURRENCY: '1',
+  SCRAPLING_CONCURRENCY: '1',
+
+  // News holds every article in memory before batching them through the model,
+  // so it was the largest single allocation in a run — 150 articles with their
+  // content against a handful of companies per web query.
+  NEWS_MAX_ARTICLES: '60',
+  NEWS_MAX_QUERIES: '6',
+  NEWS_CONCURRENCY: '2',
+
+  // Discovery volume, matching render.yaml rather than .env: a dev machine is
+  // sized for far more, and syncing its numbers onto the free instance is what
+  // OOM-killed it. Raise these together with the `disk:` block on a paid plan.
+  DISCOVERY_TARGET_LEADS: '8',
+  DISCOVERY_MAX_QUERIES: '6',
+  LINKEDIN_TARGET_LEADS: '5',
+  LINKEDIN_MAX_QUERIES: '3',
+  BUYER_TARGET_LEADS: '5',
+  BUYER_MAX_QUERIES: '3',
+  DISCOVERY_DIRECTORY_PAGES: '2',
+  DISCOVERY_DIRECTORY_LINKS: '10',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying

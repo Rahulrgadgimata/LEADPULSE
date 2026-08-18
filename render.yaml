@@ -42,12 +42,14 @@ services:
         value: "true"
       - key: SQLITE_PATH
         value: /var/data/database.sqlite
-      # The free instance is capped at 512Mi and the container was OOM-killed
-      # (exit 137) twice during discovery runs. Hold V8's heap well under the
-      # cgroup limit so it collects garbage instead of growing until the kernel
-      # kills the process — an OOM kill also wipes the diskless database.
+      # The free instance is capped at 512Mi, shared with the Python Scrapling
+      # sidecar, and the container has been killed mid-discovery repeatedly.
+      # Hold V8's heap well under the cgroup limit so it collects garbage
+      # instead of growing until the kernel steps in — a kill also wipes the
+      # diskless database. This is the safety net; the volume and concurrency
+      # settings further down are the actual fix.
       - key: NODE_OPTIONS
-        value: --max-old-space-size=320
+        value: --max-old-space-size=256
       # Empty = same-origin only, which is right because this service also
       # serves the UI.
       - key: CORS_ORIGIN
@@ -145,11 +147,11 @@ services:
       # deadline between queries and stop early. That is what allows every
       # source to be scraped properly here without a run growing unbounded.
       #
-      # Memory, not time, is the binding constraint on this instance type. A run
-      # at 30 leads OOM-killed the container mid-enrichment and, with no disk,
-      # took the database with it — so both the concurrency and the volume are
-      # held down here, well under what a dev machine runs. Raise them only
-      # alongside the `disk:` block and a paid plan.
+      # Memory, not time, is the binding constraint on this instance type. Runs
+      # at 30 and then 15 leads both ended with the container restarting
+      # mid-run, and with no disk each restart wiped the database — so
+      # everything here is sized for survival rather than throughput. Raise it
+      # only alongside the `disk:` block and a paid plan.
       - key: DISCOVERY_RUN_BUDGET_MS
         value: "600000"
       - key: DISCOVERY_COLLECT_BUDGET_RATIO
@@ -161,31 +163,41 @@ services:
       - key: DISCOVERY_QUEUE_LIMIT
         value: "5"
       - key: DISCOVERY_TARGET_LEADS
-        value: "15"
+        value: "8"
       - key: DISCOVERY_MAX_QUERIES
-        value: "10"
+        value: "6"
       - key: DISCOVERY_STALE_JOB_MINUTES
         value: "12"
-      # Halved from 4: each parallel worker holds a page of scraped HTML, and
-      # the peak of those is what pushed the instance past 512Mi.
+      # Serial. Peak memory is set by how many scraped pages are held at once,
+      # and concurrency is the direct multiplier on that — the one lever that
+      # cuts the peak without giving up a source. Runs take longer instead,
+      # which the ten-minute budget already allows for.
       - key: SCRAPER_CONCURRENCY
-        value: "2"
+        value: "1"
       - key: SCRAPER_PAGE_TIMEOUT_MS
         value: "8000"
       - key: ENRICHMENT_CONCURRENCY
+        value: "1"
+      # News held every article in memory before batching them through the
+      # model, which made it the largest single allocation in a run.
+      - key: NEWS_MAX_ARTICLES
+        value: "60"
+      - key: NEWS_MAX_QUERIES
+        value: "6"
+      - key: NEWS_CONCURRENCY
         value: "2"
       - key: LINKEDIN_TARGET_LEADS
-        value: "8"
-      - key: LINKEDIN_MAX_QUERIES
         value: "5"
-      - key: BUYER_TARGET_LEADS
-        value: "8"
-      - key: BUYER_MAX_QUERIES
-        value: "4"
-      - key: DISCOVERY_DIRECTORY_PAGES
+      - key: LINKEDIN_MAX_QUERIES
         value: "3"
+      - key: BUYER_TARGET_LEADS
+        value: "5"
+      - key: BUYER_MAX_QUERIES
+        value: "3"
+      - key: DISCOVERY_DIRECTORY_PAGES
+        value: "2"
       - key: DISCOVERY_DIRECTORY_LINKS
-        value: "15"
+        value: "10"
       # A freshly saved ICP is protected from deletion for an hour and wins the
       # active-target fallback. The browser also keeps a copy and restores it if
       # this instance loses the database, which a free instance does on every
