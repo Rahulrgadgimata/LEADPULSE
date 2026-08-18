@@ -205,6 +205,26 @@ services:
       - key: ICP_PROTECTION_MINUTES
         value: "60"
 
+      # ── Firecrawl (github.com/firecrawl/firecrawl) ───────────────────────
+      # Optional, and the only measured way to get Google results from this
+      # host: keyless Google answers /sorry from a datacenter IP, and twelve
+      # public SearXNG instances all rate-limited or had their JSON API off.
+      # Also renders JS-only and Cloudflare-fronted pages on Firecrawl's
+      # machines rather than in this 512Mi container. Set the key in the
+      # dashboard to enable; without it nothing changes.
+      - key: FIRECRAWL_API_KEY
+        sync: false
+      - key: FIRECRAWL_SCRAPE_FALLBACK
+        value: "true"
+
+      # ── Spreadsheet import ───────────────────────────────────────────────
+      # Uploading a company list enriches every row, so it is capped like a
+      # discovery run to keep the instance inside its memory budget.
+      - key: IMPORT_MAX_ROWS
+        value: "150"
+      - key: IMPORT_MAX_FILE_MB
+        value: "5"
+
       # ── Search sources ───────────────────────────────────────────────────
       - key: SEARCH_ENABLE_GOOGLE
         value: "false"

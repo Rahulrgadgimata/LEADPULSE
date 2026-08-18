@@ -111,6 +111,10 @@ const overrides = {
   BUYER_MAX_QUERIES: '3',
   DISCOVERY_DIRECTORY_PAGES: '2',
   DISCOVERY_DIRECTORY_LINKS: '10',
+
+  // A spreadsheet import enriches every row, so it is capped like a run.
+  IMPORT_MAX_ROWS: '150',
+  IMPORT_MAX_FILE_MB: '5',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying

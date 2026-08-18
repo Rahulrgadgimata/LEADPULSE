@@ -31,6 +31,7 @@ const icpRoutes = require('./routes/icp');
 const signalsRoutes = require('./routes/signals');
 const copilotRoutes = require('./routes/copilot');
 const outreachRoutes = require('./routes/outreach');
+const importRoutes = require('./routes/import');
 const { optionalAuth } = require('./middleware/auth');
 const { rateLimit } = require('./middleware/rateLimit');
 
@@ -135,6 +136,10 @@ app.use('/api/leads', optionalAuth, leadsRoutes);
 app.use('/api/icp', optionalAuth, icpRoutes);
 app.use('/api/signals', optionalAuth, signalsRoutes);
 
+// Spreadsheet import. Rate limited like discovery: each upload enriches every
+// row, which spends the same page-fetch and AI budget a discovery run does.
+app.use('/api/import', discoveryLimiter, optionalAuth, importRoutes);
+
 // Each copilot message costs Groq quota, so it gets its own tighter budget.
 app.use('/api/copilot', rateLimit({
   windowMs: 60000,
@@ -170,6 +175,11 @@ app.get('/api/status', optionalAuth, (req, res) => {
       hunter: { configured: Boolean(config.HUNTER_API_KEY), purpose: 'Contact email enrichment' },
       apollo: { configured: Boolean(config.APOLLO_API_KEY), purpose: 'Firmographic enrichment' },
       twitter: { configured: Boolean(config.TWITTER_BEARER_TOKEN), purpose: 'X/Twitter social signals' },
+      firecrawl: {
+        configured: Boolean(config.FIRECRAWL_API_KEY),
+        purpose: 'Google-backed search + JavaScript page rendering (the only working Google route from this host)'
+      },
+      serper: { configured: Boolean(config.SERPER_API_KEY), purpose: 'Google results API' },
       reddit: { configured: Boolean(config.REDDIT_CLIENT_ID && config.REDDIT_CLIENT_SECRET), purpose: 'Reddit social signals' }
     },
     // Live provider/model/key wiring per purpose, including fallback tiers.

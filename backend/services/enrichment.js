@@ -8,6 +8,7 @@ const { isNonProspect } = require('./discovery/collectors/domainFilter');
 const scrapling = require('./scraplingClient');
 const providerHealth = require('./providerHealth');
 const PeopleFinder = require('./discovery/collectors/peopleFinder');
+const firecrawl = require('./firecrawlClient');
 
 /**
  * Deep public-data enrichment for convertible leads.
@@ -237,9 +238,27 @@ class EnrichmentService {
       },
       validateStatus: () => true
     });
-    if (res.status >= 400 || typeof res.data !== 'string') return null;
-    if (!/text\/html/i.test(String(res.headers?.['content-type'] || 'text/html'))) return null;
-    return { html: res.data, finalUrl: res.request?.res?.responseUrl || url };
+
+    const usable = res.status < 400 &&
+      typeof res.data === 'string' &&
+      /text\/html/i.test(String(res.headers?.['content-type'] || 'text/html'));
+
+    if (usable) return { html: res.data, finalUrl: res.request?.res?.responseUrl || url };
+
+    // Last resort: a page that refuses both Scrapling and plain HTTP is either
+    // Cloudflare-fronted or rendered entirely in JavaScript, and it is often the
+    // "/team" page holding the name we are looking for. Firecrawl renders it on
+    // its own machines, so the memory cost stays off this instance. Every call
+    // spends plan credits, which is why it runs only once the free paths fail.
+    if (config.FIRECRAWL_SCRAPE_FALLBACK && firecrawl.available) {
+      const rendered = await firecrawl.scrape(url);
+      if (rendered?.html) {
+        logger.debug(`Firecrawl rendered ${url} after the direct fetch failed.`);
+        return { html: rendered.html, finalUrl: rendered.finalUrl || url };
+      }
+    }
+
+    return null;
   }
 
   static _extractFromHtml(html, host) {
@@ -422,6 +441,10 @@ function isUsefulEmail(email, host) {
   if (/noreply|no-reply|donotreply|privacy|support@|help@|webmaster|example\.com/i.test(lower)) {
     return false;
   }
+  // Retina and sized asset filenames — "icon@400.png", "logo@2x.jpg" — satisfy
+  // the email pattern exactly, and a page's srcset is full of them. One was
+  // imported as a company's contact address.
+  if (ASSET_FILENAME.test(lower)) return false;
   // Prefer emails on the company domain when known.
   if (host) {
     const domain = host.replace(/^www\./, '').toLowerCase();
@@ -431,6 +454,11 @@ function isUsefulEmail(email, host) {
   }
   return true;
 }
+
+// An "address" whose domain part is really a file extension, or whose local
+// part is a size suffix rather than a name.
+const ASSET_FILENAME =
+  /\.(png|jpe?g|gif|svg|webp|avif|ico|bmp|css|js|json|woff2?|ttf|eot|mp4|webm|mp3|pdf|zip)$/i;
 
 /**
  * LinkedIn's own marketing copy, served instead of a company page whenever the

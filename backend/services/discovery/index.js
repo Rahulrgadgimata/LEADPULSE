@@ -153,6 +153,66 @@ class DiscoveryService {
   }
 
   /**
+   * Queue a job that is not a discovery run — currently a spreadsheet import.
+   *
+   * Shares the scheduler so an import and a discovery run cannot execute at
+   * once. Both enrich leads, and the instance has only enough memory for one.
+   *
+   * @param {Object} opts
+   * @param {Object} opts.icp        the ICP the job writes into
+   * @param {Function} opts.execute  async (jobId) => void, does the work
+   * @param {string} opts.label      shown in logs, e.g. 'Import'
+   * @param {string} opts.startText  first status line the UI shows
+   * @param {boolean} [opts.preempt] cancel whatever is running first
+   */
+  static enqueueJob({ icp, execute, label = 'Job', startText = 'Starting...', triggerType = 'import', preempt = true }) {
+    if (preempt) this._preemptFor(icp);
+
+    const jobId = uuidv4();
+    const now = new Date().toISOString();
+    query(
+      `INSERT INTO discovery_jobs (id, icp_id, status, trigger_type, started_at, last_progress_at, progress, status_text)
+       VALUES (?, ?, 'queued', ?, ?, ?, 0, ?)`,
+      [jobId, icp.id, triggerType, now, now, 'Queued...']
+    );
+
+    queue.push({
+      jobId,
+      icpId: icp.id,
+      icpName: icp.name,
+      enqueuedAt: Date.now(),
+      execute,
+      label,
+      startText
+    });
+    this._pump();
+
+    return {
+      jobId,
+      state: activeRun?.jobId === jobId ? 'running' : 'queued',
+      position: this._queuePosition(jobId)
+    };
+  }
+
+  /** Progress writer shared by every job type. */
+  static progressWriter(jobId) {
+    return (progress, statusText) => {
+      query(
+        `UPDATE discovery_jobs SET progress = ?, status_text = ?, last_progress_at = ? WHERE id = ?`,
+        [progress, statusText, new Date().toISOString(), jobId]
+      );
+    };
+  }
+
+  /** Mark a job finished. Used by job types that are not discovery runs. */
+  static completeJob(jobId, statusText) {
+    query(
+      `UPDATE discovery_jobs SET status = 'completed', progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
+      [statusText, new Date().toISOString(), jobId]
+    );
+  }
+
+  /**
    * Clear the way for a run the user just asked for.
    *
    * Cancels whatever is executing, drops anything waiting, and forgets the
@@ -223,16 +283,23 @@ class DiscoveryService {
     const now = new Date().toISOString();
     query(
       `UPDATE discovery_jobs SET status = 'running', started_at = ?, last_progress_at = ?, status_text = ? WHERE id = ?`,
-      [now, now, 'Starting discovery...', next.jobId]
+      [now, now, next.startText || 'Starting discovery...', next.jobId]
     );
 
     const waited = Math.round((Date.now() - next.enqueuedAt) / 1000);
     logger.info(
-      `Discovery job ${next.jobId} starting for "${next.icpName}"` +
+      `${next.label || 'Discovery'} job ${next.jobId} starting for "${next.icpName}"` +
       (waited > 2 ? ` after waiting ${waited}s in the queue.` : '.')
     );
 
-    this._executeCollectors(next.jobId, next.icpId)
+    // A spreadsheet import enriches leads the same way a discovery run does, so
+    // it queues through here too: both hold the memory and the provider quota
+    // that only one job at a time can safely spend.
+    const work = next.execute
+      ? next.execute(next.jobId)
+      : this._executeCollectors(next.jobId, next.icpId);
+
+    work
       .catch(err => {
         logger.error(`Discovery job ${next.jobId} failed:`, err);
         query(

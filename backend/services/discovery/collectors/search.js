@@ -6,6 +6,7 @@ const GoogleScrape = require('./googleScrape');
 const BingScrape = require('./bingScrape');
 const DDG = require('./ddg');
 const runBudget = require('../runBudget');
+const firecrawl = require('../../firecrawlClient');
 
 /**
  * Multi-source web search — every provider runs, results are merged.
@@ -168,6 +169,7 @@ class Search {
 
   static get providerName() {
     const parts = ['brave-scrape', 'bing-scrape', 'duckduckgo'];
+    if (firecrawl.available) parts.unshift('firecrawl');
     if (config.SEARCH_ENABLE_GOOGLE) parts.push('google-scrape');
     if (config.BRAVE_API_KEY) parts.unshift('brave-api');
     if (config.SERPER_API_KEY) parts.unshift('serper-google');
@@ -231,6 +233,16 @@ class Search {
       });
     }
 
+    // Firecrawl leads when configured: it is Google-backed and, unlike the
+    // scrapers below it, cannot be blocked by the engine that serves us.
+    if (firecrawl.available) {
+      sources.unshift({
+        name: 'firecrawl',
+        run: () => firecrawl.search(query, perSource),
+        wasBlocked: () => false
+      });
+    }
+
     return this._mergeSources(query, limit, perSource, sources);
   }
 
@@ -250,6 +262,15 @@ class Search {
    */
   static async _runLinkedInSearch(query, limit, perSource) {
     const sources = [];
+    // LinkedIn is the case that suffers most without Google, so a configured
+    // Firecrawl goes first here.
+    if (firecrawl.available) {
+      sources.push({
+        name: 'firecrawl',
+        run: () => firecrawl.search(query, perSource),
+        wasBlocked: () => false
+      });
+    }
     if (config.SERPER_API_KEY) {
       sources.push({
         name: 'serper-google',

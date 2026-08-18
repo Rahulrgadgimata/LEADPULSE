@@ -139,6 +139,22 @@ module.exports = {
   // real API instead; scraping stays only as the last resort.
   //   Serper — https://serper.dev  (free tier ~2,500 queries)
   //   Brave  — https://brave.com/search/api  (free tier ~2,000/month)
+  // ── Firecrawl (https://github.com/firecrawl/firecrawl) ───────────────────
+  // The only measured way to get Google results from a datacenter IP. Keyless
+  // Google answers /sorry, and every public SearXNG instance tried either
+  // rate-limited or had its JSON API turned off, so without a key here the run
+  // has Bing, Brave and DuckDuckGo and no Google at all.
+  // Also renders JavaScript-only and Cloudflare-fronted pages on Firecrawl's
+  // own machines, which is what makes it affordable on a 512Mi instance.
+  // FIRECRAWL_API_URL points at a self-hosted deployment; leave it unset for
+  // the hosted API.
+  FIRECRAWL_API_KEY: process.env.FIRECRAWL_API_KEY || '',
+  FIRECRAWL_API_URL: process.env.FIRECRAWL_API_URL || 'https://api.firecrawl.dev',
+  FIRECRAWL_TIMEOUT_MS: parseInt(process.env.FIRECRAWL_TIMEOUT_MS) || 45000,
+  // Each rendered page spends plan credits, so page rendering is opt-in
+  // separately from search and only runs after the free fetchers have failed.
+  FIRECRAWL_SCRAPE_FALLBACK: process.env.FIRECRAWL_SCRAPE_FALLBACK !== 'false',
+
   SERPER_API_KEY: process.env.SERPER_API_KEY || '',
   BRAVE_API_KEY: process.env.BRAVE_API_KEY || '',
   // Keyless Google answers a discovery run's query volume with 429 /sorry
@@ -203,6 +219,15 @@ module.exports = {
   // Public LinkedIn people/buyer discovery (title + company from search snippets).
   BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 15,
   BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 8,
+
+  // ── Spreadsheet import ───────────────────────────────────────────────────
+  // Uploading a list of companies and looking up their contacts is the same
+  // enrichment work discovery does, so it is bounded the same way: a row cap
+  // keeps a huge sheet from exhausting the instance, and the budget stops a
+  // run that is going nowhere. Raise both on a paid plan.
+  IMPORT_MAX_ROWS: parseInt(process.env.IMPORT_MAX_ROWS) || 200,
+  IMPORT_MAX_FILE_MB: parseInt(process.env.IMPORT_MAX_FILE_MB) || 5,
+  IMPORT_RUN_BUDGET_MS: parseInt(process.env.IMPORT_RUN_BUDGET_MS) || 900000,
 
   // A freshly saved ICP is protected for this long: it cannot be deleted
   // without an explicit force, and it wins every "which ICP is active" fallback
