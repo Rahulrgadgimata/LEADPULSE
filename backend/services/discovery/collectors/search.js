@@ -5,6 +5,7 @@ const BraveScrape = require('./braveScrape');
 const GoogleScrape = require('./googleScrape');
 const BingScrape = require('./bingScrape');
 const DDG = require('./ddg');
+const runBudget = require('../runBudget');
 
 /**
  * Multi-source web search — every provider runs, results are merged.
@@ -76,6 +77,28 @@ function normalise(results, limit) {
   return out;
 }
 
+/**
+ * Rewrite a LinkedIn query into the one form Bing actually honours.
+ *
+ * The collectors append `linkedin.com/company/` to the end of a query, which is
+ * what Google wants. Bing ignores it there — measured across six query forms on
+ * the same terms, a trailing token (quoted or bare) returned ten results with
+ * zero LinkedIn pages among them, as did `site:linkedin.com/company` and
+ * `site:linkedin.com inurl:company`. Leading with the domain is the only form
+ * that returns company pages at all.
+ *
+ * The yield is still modest, so this keeps the source alive rather than making
+ * it strong; a SERPER_API_KEY or BRAVE_API_KEY remains the way to make LinkedIn
+ * discovery properly productive.
+ */
+function quoteLinkedInToken(query) {
+  const match = /\blinkedin\.com\/(company|in)\/?/i.exec(query);
+  if (!match) return query;
+
+  const rest = query.replace(match[0], '').replace(/\s+/g, ' ').trim();
+  return `"linkedin.com/${match[1].toLowerCase()}" ${rest}`.trim();
+}
+
 async function serperSearch(query, limit) {
   const res = await axios.post(
     'https://google.serper.dev/search',
@@ -116,6 +139,33 @@ class Search {
     return abortedForRun;
   }
 
+  /**
+   * Whether LinkedIn discovery has a source that can actually serve it.
+   *
+   * Only Google's index reliably returns third-party linkedin.com/company and
+   * /in pages. Measured on this deployment: keyless Google answers every query
+   * in a run with a /sorry interstitial, and Bing returns LinkedIn's own login
+   * and home pages instead of company profiles for every query form tried.
+   *
+   * Without Serper or the Brave API, then, the LinkedIn collectors cannot
+   * produce anything — and running them anyway spent the reserved third of the
+   * collection budget to return zero. Callers skip them and say why.
+   */
+  static linkedInViable() {
+    if (config.SERPER_API_KEY) return { ok: true, via: 'serper-google' };
+    if (config.BRAVE_API_KEY) return { ok: true, via: 'brave-api' };
+    if (config.SEARCH_ENABLE_GOOGLE && !isResting('google-scrape')) {
+      return { ok: true, via: 'google-scrape' };
+    }
+    return {
+      ok: false,
+      reason:
+        'no search source can return public LinkedIn pages — keyless Google is blocked, and Bing/Brave ' +
+        'return LinkedIn login pages rather than company profiles. Set SERPER_API_KEY (free tier ~2,500 ' +
+        'queries) or BRAVE_API_KEY to enable LinkedIn company and buyer discovery.'
+    };
+  }
+
   static get providerName() {
     const parts = ['brave-scrape', 'bing-scrape', 'duckduckgo'];
     if (config.SEARCH_ENABLE_GOOGLE) parts.push('google-scrape');
@@ -126,6 +176,9 @@ class Search {
 
   static async run(query, limit = 10) {
     if (abortedForRun) return [];
+    // The run's hard deadline (not the collection one — enrichment still
+    // resolves websites and LinkedIn pages through here after collectors stop).
+    if (runBudget.expired()) return [];
 
     const perSource = Math.min(Math.max(limit, 10), 20);
     const linkedInQuery = /linkedin\.com/i.test(query);
@@ -182,7 +235,18 @@ class Search {
   }
 
   /**
-   * LinkedIn discovery path — Google (and Serper if keyed) only.
+   * LinkedIn discovery path.
+   *
+   * This used to be Google-only, on the grounds that Bing and Brave answered
+   * LinkedIn queries with login hubs and job boards. Keyless Google now returns
+   * a /sorry interstitial for every query in a discovery run, which left
+   * LinkedIn company and buyer discovery with no working source at all — both
+   * collectors reported zero every time.
+   *
+   * Bing and Brave do index public LinkedIn pages; what they need is the domain
+   * as a quoted phrase rather than a bare token, which is what the rewrite
+   * below produces. Google stays first when it is available, and its results
+   * still win on quality — the others simply keep the source alive.
    */
   static async _runLinkedInSearch(query, limit, perSource) {
     const sources = [];
@@ -198,6 +262,21 @@ class Search {
       run: () => GoogleScrape.search(query, perSource),
       wasBlocked: () => GoogleScrape.lastRequestWasBlocked
     });
+
+    const phrased = quoteLinkedInToken(query);
+    sources.push(
+      {
+        name: 'bing-scrape',
+        run: () => BingScrape.search(phrased, perSource),
+        wasBlocked: () => BingScrape.lastRequestWasBlocked
+      },
+      {
+        name: 'brave-scrape',
+        run: () => BraveScrape.search(phrased, perSource),
+        wasBlocked: () => BraveScrape.lastRequestWasBlocked
+      }
+    );
+
     return this._mergeSources(query, limit, perSource, sources);
   }
 

@@ -6,6 +6,7 @@ const { query } = require('../config/database');
 const Search = require('./discovery/collectors/search');
 const { isNonProspect } = require('./discovery/collectors/domainFilter');
 const scrapling = require('./scraplingClient');
+const providerHealth = require('./providerHealth');
 
 /**
  * Deep public-data enrichment for convertible leads.
@@ -60,13 +61,20 @@ class EnrichmentService {
       }
 
       // ── 4. Apollo (paid gap-fill) ─────────────────────────────────────────
+      // Apollo's free plan excludes every enrichment endpoint (HTTP 403
+      // API_INACCESSIBLE), so the first refusal parks the provider instead of
+      // spending a 15-second timeout per lead for the rest of the run.
       const enrichDomain = enrichedData.company_website || domain;
-      if (config.APOLLO_API_KEY && enrichDomain) {
+      if (config.APOLLO_API_KEY && enrichDomain && !providerHealth.isDisabled('apollo')) {
         try {
           const apolloRes = await axios.post(
-            'https://api.apollo.io/v1/organizations/enrich',
-            { domain: String(enrichDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] },
+            // The path is /api/v1/...; the old /v1/... URL 404s on every call.
+            'https://api.apollo.io/api/v1/organizations/enrich',
+            {},
             {
+              params: {
+                domain: String(enrichDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0]
+              },
               headers: {
                 'Cache-Control': 'no-cache',
                 'Content-Type': 'application/json',
@@ -85,12 +93,21 @@ class EnrichmentService {
             if (org.city && org.state) enrichedData.company_location = `${org.city}, ${org.state}`;
           }
         } catch (apolloErr) {
-          logger.warn(`Apollo failed for ${enrichDomain}: ${apolloErr.response?.data?.error || apolloErr.message}`);
+          if (!providerHealth.noteFailure('apollo', apolloErr)) {
+            logger.warn(`Apollo failed for ${enrichDomain}: ${apolloErr.response?.data?.error || apolloErr.message}`);
+          }
         }
       }
 
       // ── 5. Hunter (paid contact emails) ───────────────────────────────────
-      if (config.HUNTER_API_KEY && enrichDomain && !lead.contact_email && !enrichedData.contact_email) {
+      // Free Hunter plans allow 50 domain searches per billing period; once
+      // they are gone every call returns 429 and the provider is parked until
+      // the reset date rather than retried per lead.
+      if (
+        config.HUNTER_API_KEY && enrichDomain &&
+        !lead.contact_email && !enrichedData.contact_email &&
+        !providerHealth.isDisabled('hunter')
+      ) {
         try {
           const host = String(enrichDomain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
           const hunterRes = await axios.get(
@@ -108,7 +125,10 @@ class EnrichmentService {
             if (best.linkedin) enrichedData.contact_linkedin = best.linkedin;
           }
         } catch (hunterErr) {
-          logger.warn(`Hunter failed for ${enrichDomain}: ${hunterErr.message}`);
+          const parked = providerHealth.noteFailure('hunter', hunterErr, {
+            quotaPatterns: [/searches per billing period/i, /reached the limit/i]
+          });
+          if (!parked) logger.warn(`Hunter failed for ${enrichDomain}: ${hunterErr.message}`);
         }
       }
 

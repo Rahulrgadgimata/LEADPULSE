@@ -72,11 +72,19 @@ module.exports = {
   // limit, not latency, so requests are serialised by default.
   GROQ_BATCH_SIZE: parseInt(process.env.GROQ_BATCH_SIZE) || 12,
   GROQ_CONCURRENCY: parseInt(process.env.GROQ_CONCURRENCY) || 1,
-  // Groq's free tier allows 12k tokens/min and 30 requests/min on
-  // llama-3.3-70b; pace below both to leave headroom rather than thrashing
-  // 429s. Raise these on a paid tier to speed runs up proportionally.
-  GROQ_TPM_LIMIT: parseInt(process.env.GROQ_TPM_LIMIT) || 11000,
+  // Measured against the configured key on 2026-08-18: the free tier reports
+  // x-ratelimit-limit-tokens 8000 (per minute) and x-ratelimit-limit-requests
+  // 1000 (per day) for qwen/qwen3.6-27b. The previous 11000 TPM was above the
+  // real ceiling, so the pacer waved through calls the API then rejected — the
+  // 429 storms that made discovery look broken. groqClient also reconciles
+  // these numbers against the response headers on every call, so a wrong value
+  // here self-corrects after the first request instead of costing a whole run.
+  GROQ_TPM_LIMIT: parseInt(process.env.GROQ_TPM_LIMIT) || 8000,
   GROQ_RPM_LIMIT: parseInt(process.env.GROQ_RPM_LIMIT) || 28,
+  // Requests per day, per key. Groq's free tier caps this at 1000 and reports
+  // no daily counter in the headers, so it is tracked locally: without it a
+  // couple of long runs exhaust the day silently and every later call 429s.
+  GROQ_RPD_LIMIT: parseInt(process.env.GROQ_RPD_LIMIT) || 1000,
 
   // NewsAPI
   NEWS_API_KEY: process.env.NEWS_API_KEY || '',
@@ -148,36 +156,59 @@ module.exports = {
   // "Top N companies in <city>" pages found during search are opened and mined
   // for the companies they link to — roughly 20-40 in-niche companies per page
   // against about one per ordinary search result.
-  DISCOVERY_DIRECTORY_PAGES: Math.min(parseInt(process.env.DISCOVERY_DIRECTORY_PAGES) || 2, 2),
-  DISCOVERY_DIRECTORY_LINKS: Math.min(parseInt(process.env.DISCOVERY_DIRECTORY_LINKS) || 10, 10),
+  DISCOVERY_DIRECTORY_PAGES: parseInt(process.env.DISCOVERY_DIRECTORY_PAGES) || 6,
+  DISCOVERY_DIRECTORY_LINKS: parseInt(process.env.DISCOVERY_DIRECTORY_LINKS) || 25,
   // Pause before retrying a blocked query. The block is usually a short
   // throttle, so one backoff recovers most of them.
   SEARCH_BLOCK_BACKOFF_MS: parseInt(process.env.SEARCH_BLOCK_BACKOFF_MS) || 6000,
 
-  // Discovery volume. DuckDuckGo yields ~10 unique domains per query and has no
-  // working pagination, so reaching the target means running many distinct
-  // queries — budget roughly (target / 8) queries.
-  // A 'running' job older than this is treated as abandoned (crash/restart),
-  // so a dead row cannot block discovery forever.
+  // ── Discovery volume and pacing ──────────────────────────────────────────
+  // Volume used to be clamped by hard Math.min ceilings (10 leads, 6 queries)
+  // because a runaway run could exhaust an afternoon and OOM a 512Mi instance.
+  // The ceiling is now a wall-clock budget instead: every collector checks the
+  // deadline between queries and stops early, so a run costs at most
+  // DISCOVERY_RUN_BUDGET_MS no matter how much the targets below ask for. That
+  // lets every source be scraped properly rather than truncated at six queries.
+  DISCOVERY_RUN_BUDGET_MS: parseInt(process.env.DISCOVERY_RUN_BUDGET_MS) || 600000,
+  // Share of the budget the collectors may spend. The remainder is reserved for
+  // enrichment + scoring, which must not be skipped: a discovered company with
+  // no contact and no score is not a lead.
+  DISCOVERY_COLLECT_BUDGET_RATIO: parseFloat(process.env.DISCOVERY_COLLECT_BUDGET_RATIO) || 0.6,
+
   // Minutes without a progress heartbeat before a 'running' job is considered
-  // dead. Sized above the slowest silent phase (Groq qualification, which can
-  // pace for several minutes on a free tier) but short enough that a run killed
-  // by a restart does not leave the UI polling a frozen progress bar.
-  DISCOVERY_STALE_JOB_MINUTES: parseInt(process.env.DISCOVERY_STALE_JOB_MINUTES) || 10,
-  DISCOVERY_TARGET_LEADS: Math.min(parseInt(process.env.DISCOVERY_TARGET_LEADS) || 10, 10),
-  DISCOVERY_MAX_QUERIES: Math.min(parseInt(process.env.DISCOVERY_MAX_QUERIES) || 6, 6),
+  // dead. Must stay above the longest silent phase; the run budget bounds the
+  // whole job, so this only needs to catch a process that died mid-run.
+  DISCOVERY_STALE_JOB_MINUTES: parseInt(process.env.DISCOVERY_STALE_JOB_MINUTES) || 12,
+
+  // Only one discovery run executes at a time (Chromium, search-engine
+  // throttles and Groq quota are all process-wide). Further requests queue and
+  // start this long after the previous run finishes, so search engines and the
+  // AI rate-limit windows recover before the next run leans on them again.
+  DISCOVERY_COOLDOWN_MS: parseInt(process.env.DISCOVERY_COOLDOWN_MS) || 300000,
+  // Runs waiting behind the current one. Beyond this, a request attaches to the
+  // last queued job instead of adding another.
+  DISCOVERY_QUEUE_LIMIT: parseInt(process.env.DISCOVERY_QUEUE_LIMIT) || 5,
+
+  DISCOVERY_TARGET_LEADS: parseInt(process.env.DISCOVERY_TARGET_LEADS) || 40,
+  DISCOVERY_MAX_QUERIES: parseInt(process.env.DISCOVERY_MAX_QUERIES) || 18,
   // Parallel homepage fetches while profiling candidate domains.
   SCRAPER_CONCURRENCY: parseInt(process.env.SCRAPER_CONCURRENCY) || 4,
-  SCRAPER_PAGE_TIMEOUT_MS: parseInt(process.env.SCRAPER_PAGE_TIMEOUT_MS) || 6000,
+  SCRAPER_PAGE_TIMEOUT_MS: parseInt(process.env.SCRAPER_PAGE_TIMEOUT_MS) || 8000,
   // Parallel enrich+score workers. Bounded to stay inside Hunter/Apollo limits.
   ENRICHMENT_CONCURRENCY: parseInt(process.env.ENRICHMENT_CONCURRENCY) || 4,
 
   // LinkedIn public company-page discovery (via search-engine index + soft OG fetch).
-  LINKEDIN_TARGET_LEADS: Math.min(parseInt(process.env.LINKEDIN_TARGET_LEADS) || 5, 5),
-  LINKEDIN_MAX_QUERIES: Math.min(parseInt(process.env.LINKEDIN_MAX_QUERIES) || 4, 4),
+  LINKEDIN_TARGET_LEADS: parseInt(process.env.LINKEDIN_TARGET_LEADS) || 20,
+  LINKEDIN_MAX_QUERIES: parseInt(process.env.LINKEDIN_MAX_QUERIES) || 10,
   // Public LinkedIn people/buyer discovery (title + company from search snippets).
-  BUYER_TARGET_LEADS: Math.min(parseInt(process.env.BUYER_TARGET_LEADS) || 5, 5),
-  BUYER_MAX_QUERIES: Math.min(parseInt(process.env.BUYER_MAX_QUERIES) || 3, 3),
+  BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 15,
+  BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 8,
+
+  // A freshly saved ICP is protected for this long: it cannot be deleted
+  // without an explicit force, and it wins every "which ICP is active" fallback
+  // ahead of older profiles. Without it a user who saved a target and came back
+  // later found the dashboard pointing at the seeded default instead.
+  ICP_PROTECTION_MINUTES: parseInt(process.env.ICP_PROTECTION_MINUTES) || 60,
 
   // Intake quality: only prospects with website or LinkedIn company page enter.
   // LEAD_QUALITY_MIN_SCORE and LEAD_QUALITY_DROP_WEAK_ICP used to live here.

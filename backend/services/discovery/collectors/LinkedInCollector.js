@@ -5,6 +5,7 @@ const config = require('../../../config/env');
 const Search = require('./search');
 const { isNonProspect, isMegaCorp } = require('./domainFilter');
 const { collectWithConcurrency } = require('../../../utils/concurrency');
+const runBudget = require('../runBudget');
 
 /**
  * Discovers companies from publicly indexed LinkedIn company pages.
@@ -37,6 +38,10 @@ class LinkedInCollector {
 
     for (const query of queries) {
       if (bySlug.size >= target * 1.4) break;
+      if (runBudget.collectExpired()) {
+        logger.info(`LinkedInCollector stopped after ${queriesRun} queries: collection budget reached.`);
+        break;
+      }
       queriesRun++;
 
       const results = await Search.run(query, 12);

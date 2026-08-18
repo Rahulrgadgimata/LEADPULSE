@@ -86,10 +86,15 @@ services:
         value: qwen/qwen3.6-27b
       - key: GROQ_EXTRACTION_REASONING
         value: none
+      # Measured from the API's own headers: 8000 tokens/min and 1000
+      # requests/day per key on the free tier. The previous 11000 was above the
+      # real ceiling, so the pacer approved calls the API then rejected.
       - key: GROQ_TPM_LIMIT
-        value: "11000"
+        value: "8000"
       - key: GROQ_RPM_LIMIT
         value: "28"
+      - key: GROQ_RPD_LIMIT
+        value: "1000"
       - key: GROQ_BATCH_SIZE
         value: "12"
       - key: GROQ_CONCURRENCY
@@ -136,32 +141,57 @@ services:
         value: "false"
 
       # ── Discovery volume & pacing ────────────────────────────────────────
+      # A run is bounded by the clock, not by lead counts: collectors check the
+      # deadline between queries and stop early. That is what allows every
+      # source to be scraped properly here without a run growing unbounded.
+      #
+      # Memory, not time, is the binding constraint on this instance type — the
+      # container was OOM-killed twice at 512Mi — so the *concurrency* settings
+      # below stay low while the volume targets go up. Peak memory tracks how
+      # many pages are held at once, which concurrency governs; the targets only
+      # lengthen the run.
+      - key: DISCOVERY_RUN_BUDGET_MS
+        value: "600000"
+      - key: DISCOVERY_COLLECT_BUDGET_RATIO
+        value: "0.6"
+      # One run at a time, with a 5-minute cooldown before the next queued run
+      # starts, so back-to-back runs stop throttling each other.
+      - key: DISCOVERY_COOLDOWN_MS
+        value: "300000"
+      - key: DISCOVERY_QUEUE_LIMIT
+        value: "5"
       - key: DISCOVERY_TARGET_LEADS
-        value: "10"
+        value: "30"
       - key: DISCOVERY_MAX_QUERIES
-        value: "6"
+        value: "14"
       - key: DISCOVERY_STALE_JOB_MINUTES
-        value: "10"
+        value: "12"
       # Halved from 4: each parallel worker holds a page of scraped HTML, and
       # the peak of those is what pushed the instance past 512Mi.
       - key: SCRAPER_CONCURRENCY
         value: "2"
       - key: SCRAPER_PAGE_TIMEOUT_MS
-        value: "6000"
+        value: "8000"
       - key: ENRICHMENT_CONCURRENCY
         value: "2"
       - key: LINKEDIN_TARGET_LEADS
-        value: "5"
+        value: "15"
       - key: LINKEDIN_MAX_QUERIES
-        value: "4"
+        value: "8"
       - key: BUYER_TARGET_LEADS
-        value: "5"
+        value: "12"
       - key: BUYER_MAX_QUERIES
-        value: "3"
+        value: "6"
       - key: DISCOVERY_DIRECTORY_PAGES
-        value: "2"
+        value: "4"
       - key: DISCOVERY_DIRECTORY_LINKS
-        value: "10"
+        value: "20"
+      # A freshly saved ICP is protected from deletion for an hour and wins the
+      # active-target fallback. The browser also keeps a copy and restores it if
+      # this instance loses the database, which a free instance does on every
+      # restart and spin-down.
+      - key: ICP_PROTECTION_MINUTES
+        value: "60"
 
       # ── Search sources ───────────────────────────────────────────────────
       - key: SEARCH_ENABLE_GOOGLE

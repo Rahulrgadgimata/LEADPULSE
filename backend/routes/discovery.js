@@ -4,22 +4,37 @@ const { query } = require('../config/database');
 
 const router = express.Router();
 
-// Trigger discovery for an ICP
+// Trigger discovery for an ICP.
+//
+// Always 202: a request that arrives while another run is in flight is queued
+// rather than refused. The response says which it was, so the UI can show
+// "starting" or "waiting behind another run" instead of an error the user can
+// do nothing about.
 router.post('/run/:icpId', async (req, res) => {
   try {
-    const jobId = await DiscoveryService.run(req.params.icpId, 'manual');
-    res.status(202).json({ jobId, message: 'Discovery job started' });
+    const job = await DiscoveryService.run(req.params.icpId, 'manual');
+
+    const startsInMin = Math.ceil((job.startsInMs || 0) / 60000);
+    const message = job.state === 'running'
+      ? (job.attached ? 'Attached to the discovery run already in progress' : 'Discovery job started')
+      : `Queued behind ${job.position} run${job.position === 1 ? '' : 's'} — starts in about ${startsInMin} min`;
+
+    res.status(202).json({ ...job, message });
   } catch (err) {
-    // A run already in flight is a conflict, not a failure — return the
-    // existing job so the UI can attach to it instead of starting a duplicate.
-    if (err.code === 'DISCOVERY_ALREADY_RUNNING') {
-      return res.status(409).json({ error: err.message, jobId: err.jobId });
+    if (err.code === 'DISCOVERY_QUEUE_FULL') {
+      return res.status(429).json({ error: err.message });
     }
     // An unknown ICP is a bad request, not a server fault — surface it so the
     // UI can tell the user to pick a target instead of showing a failed job.
     const notFound = /not found|No active ICP/i.test(err.message);
     res.status(notFound ? 404 : 500).json({ error: err.message });
   }
+});
+
+// Scheduler state: what is running, what is waiting, how long the cooldown has
+// left to run. The dashboard uses it to explain a queued run.
+router.get('/queue', (req, res) => {
+  res.json(DiscoveryService.schedulerStatus());
 });
 
 // Check job status

@@ -1,6 +1,7 @@
 const logger = require('../../../utils/logger');
 const Search = require('./search');
 const { isNonProspect, registrableName } = require('./domainFilter');
+const runBudget = require('../runBudget');
 
 // Applicant-tracking hosts put the employer in the first path segment
 // (boards.greenhouse.io/acme/jobs/123), so the company is recoverable even
@@ -48,6 +49,10 @@ class JobScraper {
     const seenEmployers = new Set();
 
     for (const { text: query, title } of queries) {
+      if (runBudget.collectExpired(runBudget.PRIMARY_SHARE)) {
+        logger.info('JobScraper stopped early: collection budget reached.');
+        break;
+      }
       logger.info(`JobScraper searching: ${query}`);
 
       const results = await Search.run(query, 6);

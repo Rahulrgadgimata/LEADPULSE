@@ -180,8 +180,14 @@ app.get('/api/status', optionalAuth, (req, res) => {
     },
     discovery: {
       targetLeads: config.DISCOVERY_TARGET_LEADS,
-      maxQueries: config.DISCOVERY_MAX_QUERIES
+      maxQueries: config.DISCOVERY_MAX_QUERIES,
+      runBudgetMs: config.DISCOVERY_RUN_BUDGET_MS,
+      // What the scheduler is doing right now, so a queued run is explainable.
+      scheduler: require('./services/discovery').schedulerStatus()
     },
+    // Providers parked because their quota or plan says calling them is
+    // pointless. Empty is the healthy state.
+    quotaBlocked: require('./services/providerHealth').snapshot(),
     // Phase 2. Which engine drafts messages and whether mail can actually
     // leave — the UI needs both to avoid offering a Send button that cannot
     // work. See /api/outreach/status for the full picture.
@@ -264,8 +270,11 @@ if (config.CRON_SCHEDULE) {
     try {
       const activeICPs = await ICP.listActive();
       for (const icp of activeICPs) {
-        await DiscoveryService.run(icp.id, 'scheduled');
-        logger.info(`Started scheduled discovery for ICP: ${icp.name}`);
+        // Queued, not started: the scheduler runs them one at a time with the
+        // cooldown in between, so a nightly sweep over many ICPs no longer
+        // launches every run at once and has them throttle each other out.
+        const job = await DiscoveryService.run(icp.id, 'scheduled');
+        logger.info(`Scheduled discovery ${job.state} for ICP: ${icp.name} (job ${job.jobId})`);
       }
     } catch (err) {
       logger.error('Scheduled discovery failed:', err.message);

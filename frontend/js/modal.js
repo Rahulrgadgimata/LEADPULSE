@@ -326,7 +326,16 @@ const Modal = {
     if (!confirm(`Delete ICP "${icp?.name || icpId}"? Its discovered leads stay in the database.`)) return;
 
     try {
-      const res = await fetch(`${this.API_BASE}/api/icp/${icpId}`, { method: 'DELETE' });
+      let res = await fetch(`${this.API_BASE}/api/icp/${icpId}`, { method: 'DELETE' });
+
+      // A profile saved in the last hour is protected server-side, so deleting
+      // it takes a second, explicit confirmation.
+      if (res.status === 409) {
+        const body = await res.json().catch(() => ({}));
+        if (!confirm(`${body.error || 'This ICP was saved recently.'}\n\nDelete it anyway?`)) return;
+        res = await fetch(`${this.API_BASE}/api/icp/${icpId}?force=true`, { method: 'DELETE' });
+      }
+
       if (!res.ok) throw new Error(`server responded ${res.status}`);
     } catch (err) {
       alert(`Could not delete ICP: ${err.message}`);

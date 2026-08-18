@@ -3,6 +3,7 @@ const logger = require('../../../utils/logger');
 const config = require('../../../config/env');
 const { isNonProspect } = require('./domainFilter');
 const { sleep } = require('../../../utils/concurrency');
+const providerHealth = require('../../providerHealth');
 
 const X_SEARCH_URL = 'https://api.twitter.com/2/tweets/search/recent';
 
@@ -48,6 +49,14 @@ class SocialCollector {
 
     if (!config.TWITTER_BEARER_TOKEN) {
       logger.warn('TWITTER_BEARER_TOKEN missing. Skipping X/Twitter.');
+      return signals;
+    }
+
+    // The token is valid but the X account has no credits (HTTP 402), which no
+    // retry fixes. Once seen, skip the source for the rest of the process
+    // instead of opening the same doomed request on every run.
+    if (providerHealth.isDisabled('twitter')) {
+      logger.debug(`X/Twitter skipped: ${providerHealth.reasonFor('twitter')}`);
       return signals;
     }
 
@@ -213,6 +222,9 @@ class SocialCollector {
   static _logTwitterFailure(err, page) {
     const status = err.response?.status;
     const detail = err.response?.data?.detail || err.response?.data?.title || err.message;
+
+    // Account-level refusals park the source; a 429 or a network blip does not.
+    providerHealth.noteFailure('twitter', err);
 
     if (status === 402) {
       logger.warn(

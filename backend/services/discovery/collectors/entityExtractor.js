@@ -92,28 +92,46 @@ class EntityExtractor {
   }
 
   /**
-   * The rubric. Deliberately compact: it is re-sent with every batch, so each
-   * extra line costs tokens against the per-minute budget. The failure mode it
-   * exists to prevent is the model inventing a company for a directory page.
+   * The rubric.
+   *
+   * Phrasing matters more here than anywhere else in the pipeline: this prompt
+   * decides whether the web-scrape source produces leads at all. The previous
+   * version led with the ICP and framed the task as "qualify convertible
+   * prospects", and the model read the combination of a narrow ICP and a long
+   * DROP list as licence to reject everything — measured at 0 kept out of 5 on
+   * a sample containing Razorpay, Cashfree and Zerodha, repeatably, on both
+   * reasoning settings. The whole collector was returning zero leads because of
+   * it.
+   *
+   * Two changes fix that, and the same sample then keeps exactly the three real
+   * companies and drops the wiki and the listicle on every run:
+   *
+   *  - the question is "is this page a company's own site", not "is this
+   *    prospect worth pitching". Fit is scored downstream by scoring.js, which
+   *    has the full record; asking the model to pre-judge it here only lost
+   *    leads that later stages were built to evaluate.
+   *  - DROP is an explicit closed list, and keeping is stated as the normal
+   *    outcome, so an item that matches nothing on the list is kept.
+   *
+   * It stays compact because it is re-sent with every batch and each line costs
+   * tokens against the per-minute budget.
    */
   static _systemPrompt(icp) {
     const industries = this._parseList(icp.industries);
     const geographies = this._parseList(icp.geographies);
     const jobTitles = this._parseList(icp.job_titles);
 
-    return `Qualify scraped pages as CONVERTIBLE B2B sales prospects (startups, SMBs, mid-market).
+    return `You classify scraped web pages. Each numbered item is one page. For every item, decide whether the page belongs to a real operating company a B2B sales rep could contact.
 
-ICP: ${industries.join(', ') || 'B2B technology'} | geo: ${geographies.join(', ') || 'any'} | size ${icp.company_size_min || 1}-${icp.company_size_max || 5000} | buyers: ${jobTitles.slice(0, 3).join(', ') || 'CTO'}
-Keywords: ${this._parseList(icp.keywords).slice(0, 8).join(', ') || 'none'}
+Context — the rep sells to: ${industries.join(', ') || 'B2B technology'} | geo: ${geographies.join(', ') || 'any'} | company size ${icp.company_size_min || 1}-${icp.company_size_max || 5000} | buyer titles: ${jobTitles.slice(0, 3).join(', ') || 'CTO'} | keywords: ${this._parseList(icp.keywords).slice(0, 8).join(', ') || 'none'}
 
-KEEP: one real operating company a sales rep can pitch and close — preferably startup / SME / scale-up within ICP size. Incomplete firmographics are OK if it is clearly a real company in the niche (mark icp_fit "moderate").
-DROP: directories, listicles, news, blogs, wikis, job boards, government bodies, AND mega-giants (Google, Microsoft, Amazon, Meta, IBM, Oracle, Salesforce, Infosys, TCS, Wipro, Accenture, Deloitte, etc.) — those do not convert from cold outbound.
-Prefer companies with product, customers, hiring or funding signals.
+KEEP an item when the page is a company's own site (product, pricing, customers, careers). Keep it even when it sits outside the size or geography above — fit is scored separately downstream. Most items in this list are real companies, so keeping is the normal outcome.
+DROP an item ONLY when the page is clearly one of: a directory or "top N" listicle, a news article, a blog, a wiki/encyclopedia, a job board, a government site, or a company with 10000+ employees.
 
-For each KEPT page:
-{"index":<n>,"name":"<company name only>","industry":"<specific>","location":"<City, Country or \\"\\">","employee_estimate":<int|null>,"description":"<what they sell — one sentence>","contact_title":"<ICP buyer title>","icp_fit":"strong|moderate"}
+Output one object per KEPT item:
+{"index":<n>,"name":"<company name only>","industry":"<specific>","location":"<City, Country or \\"\\">","employee_estimate":<int|null>,"description":"<what they sell — one sentence>","contact_title":"<buyer title from the list above>","icp_fit":"strong|moderate"}
 
-Never invent a name — omit instead. employee_estimate null unless stated.
+Use the company's real name from the page, never a page title. Never invent a name — omit the item instead. employee_estimate null unless the page states it.
 Return ONLY JSON: {"companies":[...]}`;
   }
 

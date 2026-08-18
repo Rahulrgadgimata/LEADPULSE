@@ -3,6 +3,7 @@ const config = require('../../../config/env');
 const Search = require('./search');
 const { isNonProspect, isMegaCorp } = require('./domainFilter');
 const LeadQuality = require('../../leadQuality');
+const runBudget = require('../runBudget');
 
 /**
  * Finds convertible buyer contacts from publicly indexed LinkedIn people pages.
@@ -26,6 +27,10 @@ class BuyerCollector {
 
     for (const query of queries) {
       if (byKey.size >= target * 1.5) break;
+      if (runBudget.collectExpired()) {
+        logger.info(`BuyerCollector stopped after ${queriesRun} queries: collection budget reached.`);
+        break;
+      }
       queriesRun++;
 
       const results = await Search.run(query, 10);

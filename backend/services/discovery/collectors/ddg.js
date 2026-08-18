@@ -1,3 +1,5 @@
+const axios = require('axios');
+const cheerio = require('cheerio');
 const puppeteer = require('puppeteer');
 const logger = require('../../../utils/logger');
 const config = require('../../../config/env');
@@ -114,6 +116,16 @@ class DDG {
 
     const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(searchQuery)}`;
 
+    // Plain HTTP before Chromium. The html endpoint answers an ordinary GET
+    // with a real browser User-Agent, and without this step DuckDuckGo produced
+    // nothing at all wherever the browser is turned off — which is exactly the
+    // memory-constrained deployment that needs every keyless source it can get.
+    const viaHttp = await this._searchOverHttp(searchUrl, searchQuery, limit);
+    if (viaHttp.length > 0) {
+      DDG.lastRequestWasBlocked = false;
+      return viaHttp;
+    }
+
     let page;
     try {
       const browser = await getBrowser();
@@ -168,6 +180,63 @@ class DDG {
       if (page) {
         try { await page.close(); } catch (e) { /* page already gone */ }
       }
+    }
+  }
+
+  /**
+   * Fetch and parse the HTML endpoint over plain HTTP. Never throws: an empty
+   * result simply hands the query on to the Puppeteer path.
+   */
+  static async _searchOverHttp(searchUrl, searchQuery, limit) {
+    try {
+      const res = await axios.get(searchUrl, {
+        timeout: 20000,
+        maxRedirects: 3,
+        responseType: 'text',
+        headers: {
+          'User-Agent': config.SCRAPER_USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          Referer: 'https://duckduckgo.com/'
+        },
+        validateStatus: () => true
+      });
+
+      const html = typeof res.data === 'string' ? res.data : '';
+      if (res.status >= 400 || !html) {
+        DDG.lastRequestWasBlocked = true;
+        return [];
+      }
+
+      const $ = cheerio.load(html);
+      const results = [];
+
+      $('.result, .web-result').each((_, el) => {
+        if (results.length >= limit) return false;
+        const $el = $(el);
+        const link = $el.find('.result__a').first();
+        const url = this.unwrap(link.attr('href'));
+        if (!url || !/^https?:\/\//i.test(url) || url.includes('duckduckgo.com')) return;
+        results.push({
+          url,
+          title: link.text().replace(/\s+/g, ' ').trim(),
+          snippet: $el.find('.result__snippet').first().text().replace(/\s+/g, ' ').trim()
+        });
+      });
+
+      if (results.length === 0) {
+        // The anti-bot page has no result nodes either, so treat an empty parse
+        // as a block and let the browser path try to get through.
+        DDG.lastRequestWasBlocked = true;
+        logger.debug(`DDG HTTP returned no results for "${searchQuery}" (status ${res.status}).`);
+        return [];
+      }
+
+      logger.debug(`DDG HTTP "${searchQuery}" -> ${results.length} results`);
+      return results;
+    } catch (err) {
+      logger.debug(`DDG HTTP failed for "${searchQuery}": ${err.message}`);
+      return [];
     }
   }
 

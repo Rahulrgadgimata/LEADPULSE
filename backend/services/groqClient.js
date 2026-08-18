@@ -58,6 +58,15 @@ function registerKey(rawKey, provider) {
     label: `${provider}:${key.slice(0, 6)}…`,
     tokenWindow: [],
     requestWindow: [],
+    // Requests in the last 24h. Groq's free tier caps daily requests (1000 on
+    // the current key) and reports no daily counter, so it is tracked here:
+    // without it a long run walks off the daily cliff mid-job and every
+    // subsequent call 429s with no way to tell that apart from a burst limit.
+    dayWindow: [],
+    // Ceilings the API itself reported, which override the configured guesses.
+    observedTpm: null,
+    observedRpm: null,
+    dayRemaining: null,
     disabled: false,
     cooldownUntil: 0
   };
@@ -118,13 +127,24 @@ function poolFor(purpose) {
   return pools[purpose] || pools.extraction;
 }
 
-function prune(window, now) {
-  while (window.length > 0 && now - window[0].at > 60000) window.shift();
+const DAY_MS = 86400000;
+
+function prune(window, now, span = 60000) {
+  while (window.length > 0 && now - window[0].at > span) window.shift();
 }
 
 function tokensUsed(state, now) {
   prune(state.tokenWindow, now);
   return state.tokenWindow.reduce((sum, entry) => sum + entry.tokens, 0);
+}
+
+/** Per-minute token ceiling: whatever the API last reported, else the config. */
+function tpmFor(state) {
+  return state.observedTpm || config.GROQ_TPM_LIMIT;
+}
+
+function rpmFor(state) {
+  return state.observedRpm || config.GROQ_RPM_LIMIT;
 }
 
 /**
@@ -136,16 +156,80 @@ function readyAt(state, cost, now) {
   if (state.cooldownUntil > now) return state.cooldownUntil;
 
   prune(state.requestWindow, now);
+  prune(state.dayWindow, now, DAY_MS);
   const used = tokensUsed(state, now);
 
-  const tokensFit = used + cost <= config.GROQ_TPM_LIMIT || state.tokenWindow.length === 0;
-  const requestsFit = state.requestWindow.length < config.GROQ_RPM_LIMIT;
-  if (tokensFit && requestsFit) return now;
+  const tokensFit = used + cost <= tpmFor(state) || state.tokenWindow.length === 0;
+  const requestsFit = state.requestWindow.length < rpmFor(state);
+  // The server's own daily counter beats the local one when it is available:
+  // it also sees spend from other processes sharing this key.
+  const dayFits = Number.isFinite(state.dayRemaining)
+    ? state.dayRemaining > 0
+    : state.dayWindow.length < config.GROQ_RPD_LIMIT;
+
+  if (tokensFit && requestsFit && dayFits) return now;
 
   const waits = [];
   if (!tokensFit) waits.push(state.tokenWindow[0].at + 60000);
   if (!requestsFit) waits.push(state.requestWindow[0].at + 60000);
+  // The daily bucket refills hours from now. Report it as unusable rather than
+  // parking the whole run on a sleep — another key or provider should take over.
+  if (!dayFits) return Infinity;
   return Math.max(...waits);
+}
+
+/**
+ * Adopt the limits the API reported.
+ *
+ * The configured TPM was 11000 while the account's real ceiling is 8000, so the
+ * pacer approved calls the server then rejected. Reading the ceiling back from
+ * every response means a stale or optimistic setting costs one 429 at most.
+ */
+function reconcileLimits(state, headers) {
+  if (!headers) return;
+
+  const limitTokens = Number(headers['x-ratelimit-limit-tokens']);
+  if (Number.isFinite(limitTokens) && limitTokens > 0 && limitTokens !== state.observedTpm) {
+    if (!state.observedTpm) {
+      logger.info(
+        `[ai] ${state.label} reports ${limitTokens} tokens/min` +
+        (limitTokens < config.GROQ_TPM_LIMIT
+          ? ` — below the configured GROQ_TPM_LIMIT of ${config.GROQ_TPM_LIMIT}; pacing to the reported value.`
+          : '.')
+      );
+    }
+    state.observedTpm = limitTokens;
+  }
+
+  // A request ceiling in the hundreds is Groq's daily bucket, not a per-minute
+  // one (the current key reports 1000/day). Recording it means the client knows
+  // the day is spent before the run walks into a wall of 429s.
+  const limitRequests = Number(headers['x-ratelimit-limit-requests']);
+  const remainingRequests = Number(headers['x-ratelimit-remaining-requests']);
+  if (Number.isFinite(limitRequests) && limitRequests >= 200) {
+    if (Number.isFinite(remainingRequests)) {
+      state.dayRemaining = remainingRequests;
+      if (remainingRequests <= 25) {
+        logger.warn(
+          `[ai] ${state.label} has only ${remainingRequests} of ${limitRequests} daily requests left.`
+        );
+      }
+    }
+  } else if (Number.isFinite(limitRequests) && limitRequests > 0) {
+    state.observedRpm = limitRequests;
+  }
+
+  // Trust the server's own view of what is left this minute: it accounts for
+  // spend from other processes sharing the key, which the local window cannot.
+  const remainingTokens = Number(headers['x-ratelimit-remaining-tokens']);
+  if (Number.isFinite(remainingTokens)) {
+    const ceiling = tpmFor(state);
+    const consumed = Math.max(0, ceiling - remainingTokens);
+    const localView = tokensUsed(state, Date.now());
+    if (consumed > localView) {
+      state.tokenWindow.push({ at: Date.now(), tokens: consumed - localView });
+    }
+  }
 }
 
 /**
@@ -179,7 +263,17 @@ async function reserve(pool, estimatedTokens) {
     }
 
     if (!best || bestAt === Infinity) {
-      throw new Error(`No usable API key for ${pool.label} (all keys invalid or exhausted)`);
+      const daily = pool.tiers.some(tier =>
+        tier.states.some(s => !s.disabled && (
+          Number.isFinite(s.dayRemaining) ? s.dayRemaining <= 0 : s.dayWindow.length >= config.GROQ_RPD_LIMIT
+        ))
+      );
+      throw new Error(
+        daily
+          ? `Daily request quota is spent on every key for ${pool.label}. It resets on a rolling 24h window — ` +
+            `add another key (GROQ_API_KEY_FALLBACK) or MISTRAL_API_KEY to keep running today.`
+          : `No usable API key for ${pool.label} (all keys invalid or exhausted)`
+      );
     }
 
     if (bestAt <= now) {
@@ -187,6 +281,8 @@ async function reserve(pool, estimatedTokens) {
       // this spend instead of all racing on the same reading.
       best.tokenWindow.push({ at: now, tokens: cost });
       best.requestWindow.push({ at: now });
+      best.dayWindow.push({ at: now });
+      if (Number.isFinite(best.dayRemaining)) best.dayRemaining--;
       return { state: best, tier: bestTier };
     }
 
@@ -242,7 +338,18 @@ class GroqClient {
           provider: tier.provider,
           model: tier.model,
           keys: tier.states.length,
-          usableKeys: tier.states.filter(s => !s.disabled).length
+          usableKeys: tier.states.filter(s => !s.disabled).length,
+          // The measured ceilings, so the dashboard shows what the account can
+          // actually do rather than what the config hopes for.
+          limits: tier.states.map(s => ({
+            key: s.label,
+            tokensPerMinute: s.observedTpm || config.GROQ_TPM_LIMIT,
+            dailyRequestsLeft: Number.isFinite(s.dayRemaining)
+              ? s.dayRemaining
+              : Math.max(0, config.GROQ_RPD_LIMIT - s.dayWindow.length),
+            cooling: s.cooldownUntil > Date.now(),
+            disabled: s.disabled
+          }))
         }))
       };
     }
@@ -310,12 +417,17 @@ class GroqClient {
           }
         );
 
+        // Adopt the ceilings and remaining budget the API just reported before
+        // returning, so the next call paces against reality rather than config.
+        reconcileLimits(state, res.headers);
+
         const content = res.data?.choices?.[0]?.message?.content;
         if (!content) throw new Error('empty completion');
         return content;
       } catch (err) {
         lastError = err;
         const status = err.response?.status;
+        reconcileLimits(state, err.response?.headers);
 
         // Not every model accepts every reasoning_effort value — Groq's
         // openai/gpt-oss-* reject "none" and allow only low/medium/high.
@@ -352,6 +464,16 @@ class GroqClient {
 
         const delay = retryDelay(err, attempt);
         if (status === 429) {
+          // A daily wall is not a burst limit: cooling down for the reported
+          // few seconds would just retry into the same wall on every attempt.
+          const detail = String(err.response?.data?.error?.message || '');
+          if (/per day|daily|RPD/i.test(detail)) {
+            state.dayRemaining = 0;
+            logger.warn(`[groq] key ${state.label} has spent its daily request quota; switching keys.`);
+            if (!this.availableFor(purpose)) break;
+            continue;
+          }
+
           // Trust the server over the local estimate: park this key until the
           // window it reported has passed, so other keys get the next call.
           state.cooldownUntil = Date.now() + delay;

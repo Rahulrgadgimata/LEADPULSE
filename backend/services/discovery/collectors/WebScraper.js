@@ -10,6 +10,7 @@ const { mapWithConcurrency } = require('../../../utils/concurrency');
 const LeadQuality = require('../../leadQuality');
 const scrapling = require('../../scraplingClient');
 const geoMatch = require('../geoMatch');
+const runBudget = require('../runBudget');
 
 /**
  * Discovers convertible companies matching an ICP by searching the public web.
@@ -38,6 +39,12 @@ class WebScraper {
 
     for (const query of queries) {
       if (candidates.size >= candidateGoal) break;
+      // Time, not a query cap, is what bounds a run now — stop issuing new
+      // searches once the collection budget is spent and profile what we have.
+      if (runBudget.collectExpired(runBudget.PRIMARY_SHARE)) {
+        logger.info(`WebScraper stopped after ${queriesRun} queries: collection budget reached.`);
+        break;
+      }
 
       queriesRun++;
       const results = await Search.run(query, 10);

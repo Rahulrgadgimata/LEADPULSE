@@ -7,6 +7,14 @@ const App = {
   // Same-origin by default; see js/config.js for split-host deployments.
   API_BASE: (window.LEADPULSE_API_BASE || '').replace(/\/$/, ''),
   ACTIVE_ICP_KEY: 'leadpulse_active_icp_id',
+  // The full active profile, kept so it can be restored if the server loses it.
+  ACTIVE_ICP_BACKUP_KEY: 'leadpulse_active_icp_backup',
+  // How long a saved ICP is guaranteed to survive, mirroring the server's
+  // protection window. The deployment stores data in SQLite with no durable
+  // disk, so a restart empties the database; without this the profile the user
+  // just configured disappeared and the dashboard silently fell back to the
+  // seeded default.
+  ICP_BACKUP_TTL_MS: 60 * 60 * 1000,
 
   allLeads: [],
   filteredLeads: [],
@@ -31,9 +39,13 @@ const App = {
 
     await this.refreshLeadsFromBackend();
 
-    // If this ICP has no leads yet, discover for it automatically.
+    // Loading the dashboard no longer starts a run. It used to fire whenever
+    // the active ICP had no leads yet, so every refresh of an empty pipeline
+    // queued another full run — the single biggest source of self-inflicted
+    // rate limiting. Discovery now starts when the user asks for it, or right
+    // after they save a target.
     if (this.allLeads.length === 0 && window.ACTIVE_ICP?.id) {
-      await this.triggerDiscoveryPipeline();
+      await this.showQueueHint();
     }
 
     console.log(`%c LEADPULSE AI REAL-TIME OS READY `, 'background: linear-gradient(135deg, #06b6d4, #8b5cf6); color: white; padding: 6px 12px; border-radius: 6px; font-weight: bold;');
@@ -51,19 +63,65 @@ const App = {
       if (res.ok) icps = await res.json();
     } catch (err) {
       console.warn('Could not load ICPs:', err.message);
+      return; // Leave the target alone rather than clearing it on a network blip.
     }
 
-    if (!Array.isArray(icps) || icps.length === 0) {
-      this.setActiveICP(null);
-      return;
-    }
+    if (!Array.isArray(icps)) icps = [];
 
     const savedId = localStorage.getItem(this.ACTIVE_ICP_KEY);
-    const icp = (savedId && icps.find(i => i.id === savedId)) ||
-                icps.find(i => i.is_active) ||
-                icps[0];
+    let icp = (savedId && icps.find(i => i.id === savedId)) ||
+              icps.find(i => i.is_active) ||
+              icps[0];
 
-    this.setActiveICP(icp);
+    // The server no longer has the profile this browser was working on. If it
+    // was saved recently, push the local copy back rather than quietly
+    // switching the user to a different target.
+    if (savedId && !icps.some(i => i.id === savedId)) {
+      const restored = await this.restoreICPFromBackup(savedId);
+      if (restored) icp = restored;
+    }
+
+    this.setActiveICP(icp || null);
+  },
+
+  /**
+   * Re-create a saved ICP the server has lost, keeping its original id.
+   *
+   * Returns the restored ICP, or null when there is no recent backup to use.
+   */
+  async restoreICPFromBackup(icpId) {
+    let backup;
+    try {
+      backup = JSON.parse(localStorage.getItem(this.ACTIVE_ICP_BACKUP_KEY) || 'null');
+    } catch (err) {
+      backup = null;
+    }
+
+    if (!backup || backup.icp?.id !== icpId) return null;
+
+    const age = Date.now() - (backup.savedAt || 0);
+    if (age > this.ICP_BACKUP_TTL_MS) {
+      // Past the guaranteed window; the user has moved on, so do not resurrect
+      // a profile they may have deliberately replaced.
+      localStorage.removeItem(this.ACTIVE_ICP_BACKUP_KEY);
+      return null;
+    }
+
+    try {
+      const res = await fetch(`${this.API_BASE}/api/icp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(backup.icp)
+      });
+      if (!res.ok) throw new Error(`server responded ${res.status}`);
+      const restored = await res.json();
+      console.info(`Restored target ICP "${restored.name}" after the server lost it.`);
+      this.toast(`Restored your target ICP "${restored.name}"`);
+      return restored;
+    } catch (err) {
+      console.warn('Could not restore the saved ICP:', err.message);
+      return null;
+    }
   },
 
   /**
@@ -110,8 +168,21 @@ const App = {
     const headerName = document.getElementById('current-icp-name');
     if (headerName) headerName.textContent = icp?.name || 'No ICP selected';
 
-    if (icp?.id) localStorage.setItem(this.ACTIVE_ICP_KEY, icp.id);
-    else localStorage.removeItem(this.ACTIVE_ICP_KEY);
+    if (icp?.id) {
+      localStorage.setItem(this.ACTIVE_ICP_KEY, icp.id);
+      // Keep a full copy alongside the pointer: the id alone cannot rebuild the
+      // profile if the server's database is reset.
+      try {
+        localStorage.setItem(
+          this.ACTIVE_ICP_BACKUP_KEY,
+          JSON.stringify({ savedAt: Date.now(), icp })
+        );
+      } catch (err) {
+        console.warn('Could not cache the active ICP locally:', err.message);
+      }
+    } else {
+      localStorage.removeItem(this.ACTIVE_ICP_KEY);
+    }
   },
 
   /**
@@ -331,10 +402,24 @@ const App = {
     }
 
     if (signals.length === 0) {
-      streamFeed.innerHTML =
-        `<div class="stream-item"><span class="stream-item__icon">📡</span>
-           <div class="stream-item__content"><strong>No signals yet</strong>
-           <p>Run Discover Leads to start collecting buying signals for this ICP.</p></div></div>`;
+      // Say whether the engine is busy: pressing Discover Leads while another
+      // run holds the engine queues this one rather than starting it now.
+      const queue = this.queueState;
+      const busy = queue && (queue.running || queue.queued > 0);
+      const detail = busy
+        ? `A discovery run is in progress${queue.queued ? ` with ${queue.queued} queued behind it` : ''}. Press Discover Leads to join the queue.`
+        : 'Run Discover Leads to start collecting buying signals for this ICP.';
+
+      const el = document.createElement('div');
+      el.className = 'stream-item';
+      el.innerHTML =
+        '<span class="stream-item__icon">📡</span>' +
+        '<div class="stream-item__content"><strong></strong><p></p></div>';
+      el.querySelector('strong').textContent = busy ? 'Discovery engine busy' : 'No signals yet';
+      el.querySelector('p').textContent = detail;
+
+      streamFeed.innerHTML = '';
+      streamFeed.appendChild(el);
       return;
     }
 
@@ -544,12 +629,18 @@ const App = {
 
       const data = await response.json();
 
-      // 409 means a run is already in flight for this ICP; attach to it rather
-      // than reporting an error or starting a second Chromium-backed run.
-      if (response.status === 409 && data.jobId) {
-        if (statusText) statusText.textContent = 'Discovery already running — following the existing run...';
-      } else if (!response.ok || !data.jobId) {
+      if (!response.ok || !data.jobId) {
         throw new Error(data.error || `Failed to start discovery job (HTTP ${response.status})`);
+      }
+
+      // The server queues rather than refuses: a run can be waiting behind
+      // another one, or behind the cooldown that follows it. Say so, instead of
+      // showing a progress bar that will sit at zero for minutes.
+      if (data.state === 'queued') {
+        if (titleText) titleText.textContent = 'Discovery queued';
+        if (statusText) statusText.textContent = this.queueMessage(data);
+      } else if (data.attached) {
+        if (statusText) statusText.textContent = 'Discovery already running — following the existing run...';
       }
 
       const jobId = data.jobId;
@@ -583,6 +674,14 @@ const App = {
           missingPolls = 0;
 
           const statusData = await statusRes.json();
+
+          // A queued run has no progress to report yet; show the wait instead.
+          if (statusData.state === 'queued') {
+            if (bar) bar.style.width = '0%';
+            if (titleText) titleText.textContent = 'Discovery queued';
+            if (statusText) statusText.textContent = statusData.statusText || this.queueMessage(statusData);
+            return;
+          }
 
           if (statusData && statusData.progress !== undefined) {
             const pct = Math.max(statusData.progress, 0);
@@ -632,6 +731,29 @@ const App = {
       console.warn('Real-time API connection notice:', err.message);
       this.showDiscoveryConnectionError(toast, statusText, bar, err.message);
     }
+  },
+
+  /** Plain-language wait for a queued run. */
+  queueMessage(job) {
+    const minutes = Math.max(1, Math.ceil((job.startsInMs || 0) / 60000));
+    const ahead = job.queuePosition || 1;
+    return ahead > 1
+      ? `Waiting behind ${ahead - 1} other run${ahead === 2 ? '' : 's'} — starts in about ${minutes} min.`
+      : `Another run just finished. This one starts in about ${minutes} min, once the sources have cooled down.`;
+  },
+
+  /**
+   * Read the scheduler state so the empty signal panel can say whether the
+   * engine is busy. Replaces the auto-run that used to fire on page load.
+   */
+  async showQueueHint() {
+    try {
+      const res = await fetch(`${this.API_BASE}/api/discovery/queue`);
+      if (res.ok) this.queueState = await res.json();
+    } catch (err) {
+      return; // The signal panel already reports an unreachable backend.
+    }
+    await this.refreshRadarStream();
   },
 
   async refreshLeadsFromBackend(icpId = null) {
