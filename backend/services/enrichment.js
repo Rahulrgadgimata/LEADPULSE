@@ -7,6 +7,7 @@ const Search = require('./discovery/collectors/search');
 const { isNonProspect } = require('./discovery/collectors/domainFilter');
 const scrapling = require('./scraplingClient');
 const providerHealth = require('./providerHealth');
+const PeopleFinder = require('./discovery/collectors/peopleFinder');
 
 /**
  * Deep public-data enrichment for convertible leads.
@@ -49,6 +50,27 @@ class EnrichmentService {
         const url = enrichedData.contact_linkedin || lead.contact_linkedin;
         const meta = await this._softFetchLinkedIn(url);
         Object.assign(enrichedData, meta);
+      }
+
+      // ── 2b. Decision-maker from the company's own team page ───────────────
+      // This is where buyer contacts come from now. The LinkedIn people route
+      // needs a search engine that indexes profiles, which no keyless source
+      // does any more, and a company's own leadership page names the same
+      // people with their exact titles — verified against live sites, it
+      // resolves a named buyer for roughly half of the companies tried.
+      const buyerDomain = enrichedData.company_website || domain;
+      if (buyerDomain && !lead.contact_name && !enrichedData.contact_name) {
+        try {
+          const icpTitles = await this._icpTitlesFor(lead.icp_id);
+          const buyer = await PeopleFinder.findBuyer(buyerDomain, icpTitles);
+          if (buyer) {
+            enrichedData.contact_name = buyer.name;
+            if (!lead.contact_title) enrichedData.contact_title = buyer.title;
+            logger.info(`Buyer found for ${lead.company_name}: ${buyer.name} (${buyer.title})`);
+          }
+        } catch (err) {
+          logger.debug(`Team-page buyer lookup failed for ${buyerDomain}: ${err.message}`);
+        }
       }
 
       // ── 3. Resolve missing website from public search ─────────────────────
@@ -350,6 +372,19 @@ class EnrichmentService {
       logger.debug(`LinkedIn soft-fetch failed: ${err.message}`);
     }
     return out;
+  }
+
+  /** The buyer titles this lead's ICP targets, best-match first. */
+  static async _icpTitlesFor(icpId) {
+    if (!icpId) return [];
+    const row = query('SELECT job_titles FROM icps WHERE id = ?', [icpId]).rows[0];
+    if (!row) return [];
+    try {
+      const parsed = JSON.parse(row.job_titles || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
   }
 
   static async _findWebsite(companyName) {

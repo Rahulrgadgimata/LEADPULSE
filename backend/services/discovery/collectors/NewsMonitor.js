@@ -5,6 +5,18 @@ const config = require('../../../config/env');
 const GroqClient = require('../../groqClient');
 const { isNonProspect } = require('./domainFilter');
 const { collectWithConcurrency } = require('../../../utils/concurrency');
+const geoMatch = require('../geoMatch');
+
+// Google News country editions, keyed by the canonical country names geoMatch
+// produces. Anything unlisted falls back to the US edition.
+const NEWS_EDITIONS = {
+  india: 'IN', 'united states': 'US', 'united kingdom': 'GB', canada: 'CA',
+  australia: 'AU', germany: 'DE', france: 'FR', netherlands: 'NL',
+  ireland: 'IE', singapore: 'SG', 'united arab emirates': 'AE',
+  japan: 'JP', brazil: 'BR', mexico: 'MX', 'south africa': 'ZA',
+  spain: 'ES', italy: 'IT', sweden: 'SE', poland: 'PL', israel: 'IL',
+  'new zealand': 'NZ',
+};
 
 /**
  * Finds companies through news coverage.
@@ -29,10 +41,16 @@ class NewsMonitor {
     logger.info(`NewsMonitor: ${queries.length} queries across Google News RSS${config.NEWS_API_KEY ? ' + NewsAPI' : ''}`);
 
     // ── 1. Collect articles from both sources ────────────────────────────────
+    // Google News is regionalised: the same query against the US edition and
+    // the India edition returns different outlets and different companies.
+    // Following the ICP's geography is what makes news leads land in the target
+    // region rather than reading as a US tech feed whatever the ICP said.
+    const edition = this._editionFor(icp);
+
     const rss = await collectWithConcurrency(
       queries,
       config.NEWS_CONCURRENCY,
-      query => this._googleNews(query)
+      query => this._googleNews(query, edition)
     );
 
     const newsapi = config.NEWS_API_KEY
@@ -126,8 +144,22 @@ class NewsMonitor {
   /**
    * Google News RSS. Keyless and generous, so it carries the bulk of the load.
    */
-  static async _googleNews(query) {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+  /**
+   * Google News edition for the ICP's first geography, defaulting to the US.
+   * `gl` selects the country edition and `ceid` must agree with it.
+   */
+  static _editionFor(icp) {
+    const geo = geoMatch.canonical(this._parseList(icp.geographies)[0] || '');
+    const code = NEWS_EDITIONS[geo];
+    return code
+      ? { hl: `en-${code}`, gl: code, ceid: `${code}:en` }
+      : { hl: 'en-US', gl: 'US', ceid: 'US:en' };
+  }
+
+  static async _googleNews(query, edition = { hl: 'en-US', gl: 'US', ceid: 'US:en' }) {
+    const url =
+      `https://news.google.com/rss/search?q=${encodeURIComponent(query)}` +
+      `&hl=${edition.hl}&gl=${edition.gl}&ceid=${encodeURIComponent(edition.ceid)}`;
     try {
       const res = await axios.get(url, {
         headers: { 'User-Agent': config.SCRAPER_USER_AGENT, Accept: 'application/rss+xml,*/*' },

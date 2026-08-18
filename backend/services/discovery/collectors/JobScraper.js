@@ -37,11 +37,25 @@ class JobScraper {
     //     anti-bot page, so ATS hosts are probed one query at a time.
     // Each query carries the title it came from, so a result missing its own
     // headline can still be labelled correctly.
+    // Only applicant-tracking URLs name an employer, so the queries aim
+    // straight at the boards. Two titles against two ATS hosts produced too
+    // little to matter — the collector contributed nothing on entire runs while
+    // news filled the pipeline — so the sweep is wider and carries the
+    // geography, which also keeps the employers inside the target region.
+    const geo = geographies[0] || '';
+    const atsSites = [
+      'boards.greenhouse.io', 'jobs.lever.co', 'jobs.ashbyhq.com',
+      'apply.workable.com', 'careers.smartrecruiters.com'
+    ];
+
     const queries = [];
-    for (const title of jobTitles.slice(0, 2)) {
-      queries.push({ text: `${title} hiring careers ${geographies[0] || ''}`.trim(), title });
-      queries.push({ text: `site:boards.greenhouse.io ${title}`, title });
-      queries.push({ text: `site:jobs.lever.co ${title}`, title });
+    for (const title of jobTitles.slice(0, 3)) {
+      for (const site of atsSites) {
+        queries.push({ text: `site:${site} ${title} ${geo}`.trim(), title });
+      }
+      // Without the site: operator, for engines that handle it poorly.
+      queries.push({ text: `${title} jobs greenhouse lever ${geo}`.trim(), title });
+      queries.push({ text: `${title} hiring careers ${geo}`.trim(), title });
     }
 
     // One ATS employer often appears several times (job page, apply page, board

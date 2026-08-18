@@ -65,7 +65,19 @@ class EntityExtractor {
     }
 
     const rows = response.companies || response.results || [];
-    if (!Array.isArray(rows)) return [];
+
+    // An empty array is a real answer only when the batch genuinely holds no
+    // companies, which is rare — most batches are search results for an
+    // industry. Treating "kept nothing" as final is how a whole run's web
+    // candidates disappeared silently, so fall back to heuristics exactly as if
+    // the call had failed, and say so.
+    if (!Array.isArray(rows) || rows.length === 0) {
+      logger.warn(
+        `Groq kept none of ${batch.length} candidates in a batch; applying heuristics instead ` +
+        `(first: ${batch[0]?.domain || 'n/a'}).`
+      );
+      return batch.map(item => this._fallbackLead(item)).filter(Boolean);
+    }
 
     const leads = [];
     for (const row of rows) {
@@ -126,6 +138,7 @@ class EntityExtractor {
 Context — the rep sells to: ${industries.join(', ') || 'B2B technology'} | geo: ${geographies.join(', ') || 'any'} | company size ${icp.company_size_min || 1}-${icp.company_size_max || 5000} | buyer titles: ${jobTitles.slice(0, 3).join(', ') || 'CTO'} | keywords: ${this._parseList(icp.keywords).slice(0, 8).join(', ') || 'none'}
 
 KEEP an item when the page is a company's own site (product, pricing, customers, careers). Keep it even when it sits outside the size or geography above — fit is scored separately downstream. Most items in this list are real companies, so keeping is the normal outcome.
+Some items carry only a domain and a name because the page could not be read. Keep those too when the domain looks like a company's own site, and leave the fields you cannot support empty.
 DROP an item ONLY when the page is clearly one of: a directory or "top N" listicle, a news article, a blog, a wiki/encyclopedia, a job board, a government site, or a company with 10000+ employees.
 
 Output one object per KEPT item:
@@ -236,8 +249,13 @@ Return ONLY JSON: {"companies":[...]}`;
     const base = item.domain.split('.')[0];
     if (!base || base.length < 3) return null;
 
-    // Without model classification, an unreachable page is unverifiable.
-    if (!item.fetched) return null;
+    // Without model classification, an unreachable page is normally
+    // unverifiable — except when the company was harvested from a curated
+    // "top N companies in <city>" listing, where being on the list is itself
+    // the evidence. Those are the bulk of the candidates on runs where most
+    // homepages block a plain fetch, and dropping them lost the web source
+    // entirely on exactly the runs that needed it.
+    if (!item.fetched && !item.viaDirectory) return null;
 
     const text = `${item.title || ''} ${item.metaDescription || ''} ${item.snippet || ''}`;
     if (DIRECTORY_HINTS.test(text) || DIRECTORY_HINTS.test(item.domain)) {

@@ -177,6 +177,139 @@ function locationMatchesGeographies(location, geographies) {
   return false;
 }
 
+/**
+ * Country-coded top-level domains. A company on a ccTLD is nearly always
+ * operating in that country, which makes the domain the single most reliable
+ * location signal available for a lead whose page never states an address.
+ */
+const CCTLD_COUNTRY = {
+  in: 'india', 'co.in': 'india', 'org.in': 'india', 'net.in': 'india',
+  uk: 'united kingdom', 'co.uk': 'united kingdom', 'org.uk': 'united kingdom',
+  us: 'united states',
+  ca: 'canada',
+  au: 'australia', 'com.au': 'australia',
+  de: 'germany', fr: 'france', nl: 'netherlands', ie: 'ireland',
+  es: 'spain', it: 'italy', se: 'sweden', pl: 'poland',
+  sg: 'singapore', 'com.sg': 'singapore',
+  ae: 'united arab emirates', 'co.ae': 'united arab emirates',
+  il: 'israel', 'co.il': 'israel',
+  jp: 'japan', 'co.jp': 'japan',
+  br: 'brazil', 'com.br': 'brazil',
+  mx: 'mexico', nz: 'new zealand', 'co.nz': 'new zealand',
+  za: 'south africa', 'co.za': 'south africa',
+};
+
+/** International dialling prefixes, longest first so +1 does not eat +44. */
+const PHONE_COUNTRY = [
+  ['+971', 'united arab emirates'],
+  ['+972', 'israel'],
+  ['+353', 'ireland'],
+  ['+91', 'india'],
+  ['+44', 'united kingdom'],
+  ['+61', 'australia'],
+  ['+65', 'singapore'],
+  ['+64', 'new zealand'],
+  ['+49', 'germany'],
+  ['+33', 'france'],
+  ['+31', 'netherlands'],
+  ['+34', 'spain'],
+  ['+39', 'italy'],
+  ['+46', 'sweden'],
+  ['+48', 'poland'],
+  ['+81', 'japan'],
+  ['+55', 'brazil'],
+  ['+52', 'mexico'],
+  ['+27', 'south africa'],
+  ['+1', 'united states'],
+];
+
+/** The ccTLD suffix of a domain, or null for .com/.io/.ai and friends. */
+function countryFromDomain(website) {
+  const host = String(website || '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .split('/')[0]
+    .toLowerCase();
+  if (!host.includes('.')) return null;
+
+  const parts = host.split('.');
+  const twoLevel = parts.slice(-2).join('.');
+  return CCTLD_COUNTRY[twoLevel] || CCTLD_COUNTRY[parts[parts.length - 1]] || null;
+}
+
+function countryFromPhone(phone) {
+  const digits = String(phone || '').replace(/[^\d+]/g, '');
+  if (!digits.startsWith('+')) return null;
+  for (const [prefix, country] of PHONE_COUNTRY) {
+    if (digits.startsWith(prefix)) return country;
+  }
+  return null;
+}
+
+/** Any city or country name this module knows, mentioned anywhere in the text. */
+function countryFromText(text) {
+  const haystack = normalize(text);
+  if (!haystack) return null;
+
+  for (const [city, country] of CITY_TO_COUNTRY) {
+    if (city.length >= 4 && containsToken(haystack, city)) return country;
+  }
+  for (const country of Object.keys(CITY_HINTS)) {
+    if (containsToken(haystack, country)) return country;
+  }
+  for (const [alias, country] of Object.entries(COUNTRY_ALIASES)) {
+    if (alias.length >= 4 && containsToken(haystack, alias)) return country;
+  }
+  return null;
+}
+
+/**
+ * Work out where a lead actually is, from whatever the pipeline captured.
+ *
+ * A stated location is used as-is. Failing that the signals are tried in
+ * descending order of reliability — a company on a .in domain or answering a
+ * +91 number is in India whether or not its site says so anywhere.
+ *
+ * This exists because "unknown location" was the pipeline's dominant outcome,
+ * and unknown leads were kept: news-derived leads never carry an address, so
+ * they sailed through the geography filter while located web leads were checked
+ * properly. Targeting a country therefore filtered out the very sources that
+ * knew where they were, and the pipeline filled up with news from anywhere.
+ *
+ * @returns {{location: string|null, basis: string}}
+ */
+function resolveLocation(lead) {
+  if (!lead) return { location: null, basis: 'none' };
+
+  const stated = String(lead.company_location || '').trim();
+  if (stated) return { location: stated, basis: 'stated' };
+
+  const fromDomain = countryFromDomain(lead.company_website);
+  if (fromDomain) return { location: titleCase(fromDomain), basis: 'domain' };
+
+  const fromPhone = countryFromPhone(lead.contact_phone);
+  if (fromPhone) return { location: titleCase(fromPhone), basis: 'phone' };
+
+  // The query that found it often names the city ("fintech startups in Pune").
+  const query = lead.raw_signal_data && typeof lead.raw_signal_data === 'object'
+    ? lead.raw_signal_data.query
+    : null;
+  const fromQuery = countryFromText(query);
+  if (fromQuery) return { location: titleCase(fromQuery), basis: 'query' };
+
+  const fromDescription = countryFromText(lead.company_description);
+  if (fromDescription) return { location: titleCase(fromDescription), basis: 'description' };
+
+  return { location: null, basis: 'none' };
+}
+
+function titleCase(value) {
+  return String(value || '')
+    .split(' ')
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 // Same city, two spellings. Both must stay in CITY_HINTS so either form is
 // recognised in a scraped location, but issuing a search query for each just
 // spends the query budget twice on one city.
@@ -206,11 +339,38 @@ function citiesFor(geographies) {
   return [...new Set(cities)];
 }
 
+/**
+ * The geography verdict for a whole lead, after inferring its location.
+ *
+ * @returns {{ok: boolean, location: string|null, basis: string, reason: string}}
+ */
+function leadMatchesGeographies(lead, geographies) {
+  const list = (Array.isArray(geographies) ? geographies : []).filter(Boolean);
+  if (list.length === 0) return { ok: true, location: null, basis: 'none', reason: 'no target geography' };
+
+  const { location, basis } = resolveLocation(lead);
+  if (!location) {
+    return { ok: false, location: null, basis, reason: 'location could not be determined' };
+  }
+
+  const verdict = locationMatchesGeographies(location, list);
+  return {
+    ok: verdict === true,
+    location,
+    basis,
+    reason: verdict === true ? 'in target geography' : `"${location}" is outside ${list.join(', ')}`
+  };
+}
+
 module.exports = {
   CITY_HINTS,
   normalize,
   canonical,
   expandGeography,
   locationMatchesGeographies,
+  leadMatchesGeographies,
+  resolveLocation,
+  countryFromDomain,
+  countryFromPhone,
   citiesFor,
 };

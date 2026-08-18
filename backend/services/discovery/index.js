@@ -22,7 +22,20 @@ const GoogleScrape = require('./collectors/googleScrape');
 const Search = require('./collectors/search');
 const LeadQuality = require('../leadQuality');
 const runBudget = require('./runBudget');
+const geoMatch = require('./geoMatch');
 const providerHealth = require('../providerHealth');
+
+/** ICP list columns are stored as JSON text. */
+function parseIcpList(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (e) {
+    return [];
+  }
+}
 
 // Maps collector source labels onto the `leads.source` values the UI filters on.
 const SOURCE_MAP = {
@@ -350,7 +363,14 @@ class DiscoveryService {
       // Intake gate: only best convertible prospects enter enrich + score.
       // The ICP is passed so the geography filter applies here, at the one
       // point that sees every collector's output.
-      const allDiscovered = LeadQuality.filterBest(rawDiscovered, icp);
+      const qualified = LeadQuality.filterBest(rawDiscovered, icp);
+
+      // Then balance the mix. Google News returns up to 150 articles per run
+      // against a handful of companies per search query, so on raw volume news
+      // swamped everything — a pipeline that was supposed to span the web, job
+      // boards and social read as a news feed. Interleaving by source gives
+      // every collector a share of the processing budget.
+      const allDiscovered = this._balanceSources(qualified);
       logger.info(
         `Discovery collected ${rawDiscovered.length} raw → ${allDiscovered.length} best leads: ${JSON.stringify(perSource)}`
       );
@@ -378,7 +398,8 @@ class DiscoveryService {
       query(
         `UPDATE discovery_jobs SET status = 'completed', progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
         [
-          `Completed: ${stats.created} new leads, ${stats.duplicates} duplicates, ${stats.failed} failed.`,
+          `Completed: ${stats.created} new leads, ${stats.duplicates} duplicates, ` +
+          `${stats.outsideGeography} outside target geography, ${stats.failed} failed.`,
           new Date().toISOString(),
           jobId
         ]
@@ -388,7 +409,8 @@ class DiscoveryService {
 
       logger.info(
         `Discovery job ${jobId} completed. items=${allDiscovered.length} ` +
-        `new=${stats.created} duplicate=${stats.duplicates} failed=${stats.failed}`
+        `new=${stats.created} duplicate=${stats.duplicates} ` +
+        `outside-geo=${stats.outsideGeography} failed=${stats.failed}`
       );
     } finally {
       runBudget.clear();
@@ -517,7 +539,7 @@ class DiscoveryService {
    */
   static async _processItems(items, icp, updateProgress) {
     const total = items.length;
-    const stats = { created: 0, duplicates: 0, failed: 0 };
+    const stats = { created: 0, duplicates: 0, failed: 0, outsideGeography: 0 };
     let completed = 0;
 
     // Throttle progress writes: one UPDATE per item would be hundreds of
@@ -571,6 +593,19 @@ class DiscoveryService {
 
         if (isNew) {
           await EnrichmentService.enrich(lead.id);
+
+          // Geography is enforced here, not at intake: enrichment is what
+          // resolves an address, and a lead's location is usually unknown until
+          // it has run. Checking earlier meant "unknown" had to be allowed
+          // through, which is why targeting a country still returned companies
+          // from everywhere — news-derived leads never carry an address, so
+          // they passed unchecked while located web leads were filtered.
+          const verdict = this._checkGeography(lead.id, icp);
+          if (!verdict.ok) {
+            stats.outsideGeography++;
+            return;
+          }
+
           await ScoringService.compute(lead.id);
         }
       } catch (itemErr) {
@@ -586,6 +621,98 @@ class DiscoveryService {
     });
 
     return stats;
+  }
+
+  /**
+   * Interleave prospects across their collectors, so the run's mix reflects
+   * every source rather than whichever one returns the most rows.
+   *
+   * Round-robin rather than a fixed per-source quota: when a source has little
+   * to offer, its slots go to the others instead of shrinking the run. The cap
+   * only bites when a source has a genuine surplus and the rest can fill in.
+   */
+  static _balanceSources(items) {
+    const bySource = new Map();
+    for (const item of items) {
+      const key = SOURCE_MAP[item.source || item.signal?.source] || 'web_scrape';
+      if (!bySource.has(key)) bySource.set(key, []);
+      bySource.get(key).push(item);
+    }
+
+    if (bySource.size <= 1) return items;
+
+    // Headroom over the target, because the geography gate and deduplication
+    // both remove leads later in the run.
+    const budget = Math.max(items.length === 0 ? 0 : config.DISCOVERY_TARGET_LEADS * 2, 0);
+    const queues = [...bySource.entries()];
+    const balanced = [];
+
+    let drained = false;
+    for (let round = 0; !drained && balanced.length < budget; round++) {
+      drained = true;
+      for (const [, list] of queues) {
+        if (round >= list.length) continue;
+        drained = false;
+        balanced.push(list[round]);
+        if (balanced.length >= budget) break;
+      }
+    }
+
+    const before = Object.fromEntries(queues.map(([name, list]) => [name, list.length]));
+    const after = {};
+    for (const item of balanced) {
+      const key = SOURCE_MAP[item.source || item.signal?.source] || 'web_scrape';
+      after[key] = (after[key] || 0) + 1;
+    }
+    logger.info(
+      `Source balance: ${JSON.stringify(before)} -> ${JSON.stringify(after)} ` +
+      `(${balanced.length} of ${items.length} enter enrichment)`
+    );
+
+    return balanced;
+  }
+
+  /**
+   * Enforce the ICP's geography on an enriched lead.
+   *
+   * A lead that fails is deleted rather than kept with a low score: the user
+   * asked for companies in a place, and a list that quietly includes companies
+   * from elsewhere is worse than a shorter list. Set LEAD_GEO_STRICT=false to
+   * keep them and rely on the scoring penalty instead.
+   */
+  static _checkGeography(leadId, icp) {
+    const geographies = parseIcpList(icp.geographies);
+    if (geographies.length === 0) return { ok: true };
+
+    const row = query('SELECT * FROM leads WHERE id = ?', [leadId]).rows[0];
+    if (!row) return { ok: true };
+
+    // raw_signal_data is stored as JSON text; the query that found the lead is
+    // one of the location signals.
+    let parsed = row;
+    try {
+      parsed = { ...row, raw_signal_data: JSON.parse(row.raw_signal_data || 'null') };
+    } catch (e) { /* leave as text; resolveLocation tolerates it */ }
+
+    const verdict = geoMatch.leadMatchesGeographies(parsed, geographies);
+    if (verdict.ok) {
+      // Record an inferred location so the dashboard shows where a lead is and
+      // the scorer can credit the geography match.
+      if (!row.company_location && verdict.location) {
+        query('UPDATE leads SET company_location = ? WHERE id = ?', [verdict.location, leadId]);
+      }
+      return verdict;
+    }
+
+    if (!config.LEAD_GEO_STRICT) {
+      logger.debug(`Keeping out-of-geography lead ${row.company_name}: ${verdict.reason} (LEAD_GEO_STRICT=false)`);
+      return { ok: true };
+    }
+
+    query('DELETE FROM signals WHERE lead_id = ?', [leadId]);
+    query('DELETE FROM leads WHERE id = ?', [leadId]);
+    logger.debug(`Dropped ${row.company_name}: ${verdict.reason} (from ${verdict.basis})`);
+    return verdict;
   }
 
   static async getJobStatus(jobId) {
