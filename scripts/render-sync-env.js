@@ -80,6 +80,20 @@ const overrides = {
   SCRAPER_CONCURRENCY: '2',
   ENRICHMENT_CONCURRENCY: '2',
   SCRAPLING_CONCURRENCY: '2',
+
+  // Discovery volume, matching render.yaml rather than .env. Peak memory tracks
+  // how many pages are held at once — the concurrency settings above — while
+  // these only lengthen the run, but a dev machine is sized for more of both and
+  // syncing its numbers straight onto the free instance is how it got OOM-killed
+  // before. The run budget bounds the job either way.
+  DISCOVERY_TARGET_LEADS: '30',
+  DISCOVERY_MAX_QUERIES: '14',
+  LINKEDIN_TARGET_LEADS: '15',
+  LINKEDIN_MAX_QUERIES: '8',
+  BUYER_TARGET_LEADS: '12',
+  BUYER_MAX_QUERIES: '6',
+  DISCOVERY_DIRECTORY_PAGES: '4',
+  DISCOVERY_DIRECTORY_LINKS: '20',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying
