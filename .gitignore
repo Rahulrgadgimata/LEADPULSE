@@ -48,3 +48,7 @@ tmp/
 backend/scrapling/upstream/
 backend/scrapling/__pycache__/
 backend/scrapling/**/__pycache__/
+
+# Reference clone of the crawl4ai toolkit — its own repository, not part of
+# this project's source. Kept locally for the leadfinder prototype it ships.
+crawl4ai/
