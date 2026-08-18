@@ -139,6 +139,22 @@ module.exports = {
   // real API instead; scraping stays only as the last resort.
   //   Serper — https://serper.dev  (free tier ~2,500 queries)
   //   Brave  — https://brave.com/search/api  (free tier ~2,000/month)
+  // ── SearchAPI.io — Google web + Google Maps ──────────────────────────────
+  // The only configured provider that reaches Google Maps, which returns
+  // operating local businesses with an address, a phone number and a website,
+  // already inside the requested city. That is a better lead than anything the
+  // page-scraping collectors produce, so Maps runs first among paid sources.
+  //
+  // Credits are few, so spending is capped per run: the keyless sources still
+  // do the bulk of the work, and a credit is only spent where nothing free can
+  // substitute (Maps, and Google for LinkedIn queries).
+  SEARCHAPI_KEY: process.env.SEARCHAPI_KEY || '',
+  SEARCHAPI_TIMEOUT_MS: parseInt(process.env.SEARCHAPI_TIMEOUT_MS) || 30000,
+  SEARCHAPI_MAX_QUERIES_PER_RUN: parseInt(process.env.SEARCHAPI_MAX_QUERIES_PER_RUN) || 6,
+  // Maps queries are "<industry> company" per city; these bound the spread.
+  MAPS_MAX_QUERIES: parseInt(process.env.MAPS_MAX_QUERIES) || 4,
+  MAPS_MAX_CITIES: parseInt(process.env.MAPS_MAX_CITIES) || 3,
+
   // ── Firecrawl (https://github.com/firecrawl/firecrawl) ───────────────────
   // The only measured way to get Google results from a datacenter IP. Keyless
   // Google answers /sorry, and every public SearXNG instance tried either

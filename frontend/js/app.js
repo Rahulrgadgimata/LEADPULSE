@@ -300,10 +300,12 @@ const App = {
     if (!el) return;
     const labels = {
       web_scrape: 'Web',
+      maps: 'Maps',
       news: 'News',
       job_board: 'Jobs',
       linkedin: 'LinkedIn',
       social: 'Social',
+      import: 'Imported',
     };
     const counts = {};
     for (const lead of leads) {

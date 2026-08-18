@@ -16,6 +16,7 @@ const JobScraper = require('./collectors/JobScraper');
 const SocialCollector = require('./collectors/SocialCollector');
 const LinkedInCollector = require('./collectors/LinkedInCollector');
 const BuyerCollector = require('./collectors/BuyerCollector');
+const MapsCollector = require('./collectors/MapsCollector');
 const DDG = require('./collectors/ddg');
 const BraveScrape = require('./collectors/braveScrape');
 const GoogleScrape = require('./collectors/googleScrape');
@@ -24,6 +25,7 @@ const LeadQuality = require('../leadQuality');
 const runBudget = require('./runBudget');
 const geoMatch = require('./geoMatch');
 const providerHealth = require('../providerHealth');
+const searchApi = require('../searchApiClient');
 
 /** ICP list columns are stored as JSON text. */
 function parseIcpList(value) {
@@ -46,6 +48,7 @@ const SOURCE_MAP = {
   Reddit: 'social',
   LinkedIn: 'linkedin',
   LinkedInBuyer: 'linkedin',
+  Maps: 'maps',
   DiscoveryPipeline: 'web_scrape'
 };
 
@@ -399,6 +402,8 @@ class DiscoveryService {
       // Bound the run by the clock rather than by lead counts, so every source
       // gets to contribute and the job still finishes predictably.
       runBudget.start(config.DISCOVERY_RUN_BUDGET_MS);
+      // Paid search credits are budgeted per run, not per process.
+      searchApi.resetRunBudget();
 
       logger.info(`Starting discovery for ICP: ${icp.name} (target ${config.DISCOVERY_TARGET_LEADS} leads)`);
 
@@ -439,6 +444,11 @@ class DiscoveryService {
             }
           })
         },
+        // Maps first among these: it returns businesses with a phone number and
+        // a verified address in the target city, which is the highest-quality
+        // lead shape in the pipeline and the only source that reliably carries
+        // a phone at all.
+        { name: 'MapsCollector', run: () => MapsCollector.search(icp) },
         { name: 'NewsMonitor', run: () => NewsMonitor.searchNews(icp) },
         { name: 'JobScraper', run: () => JobScraper.searchJobs(icp) },
         { name: 'SocialCollector', run: () => SocialCollector.searchSocial(icp) }

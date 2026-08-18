@@ -127,10 +127,12 @@ const Filters = {
   buildSourceFilters(leads) {
     const sourceLabels = {
       web_scrape: 'Web',
+      maps: 'Maps',
       linkedin: 'LinkedIn',
       news: 'News',
       job_board: 'Jobs',
       social: 'Social',
+      import: 'Imported',
       enrichment: 'Enrichment',
     };
     const container = document.getElementById('filter-sources') || document.getElementById('source-filters');

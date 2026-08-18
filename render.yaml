@@ -217,6 +217,22 @@ services:
       - key: FIRECRAWL_SCRAPE_FALLBACK
         value: "true"
 
+      # ── SearchAPI.io — Google web + Google Maps ──────────────────────────
+      # Maps is why this is here: operating local businesses with a street
+      # address, a phone number and a website, inside the requested city. It is
+      # the only source in the pipeline that reliably carries a phone number,
+      # and the only one whose results are geo-correct by construction.
+      # Credits are few, so per-run spending is capped and the keyless sources
+      # still do the bulk of the work.
+      - key: SEARCHAPI_KEY
+        sync: false
+      - key: SEARCHAPI_MAX_QUERIES_PER_RUN
+        value: "6"
+      - key: MAPS_MAX_QUERIES
+        value: "4"
+      - key: MAPS_MAX_CITIES
+        value: "3"
+
       # ── Spreadsheet import ───────────────────────────────────────────────
       # Uploading a company list enriches every row, so it is capped like a
       # discovery run to keep the instance inside its memory budget.

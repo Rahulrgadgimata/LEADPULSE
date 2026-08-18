@@ -7,6 +7,7 @@ const BingScrape = require('./bingScrape');
 const DDG = require('./ddg');
 const runBudget = require('../runBudget');
 const firecrawl = require('../../firecrawlClient');
+const searchApi = require('../../searchApiClient');
 
 /**
  * Multi-source web search — every provider runs, results are merged.
@@ -153,6 +154,8 @@ class Search {
    * collection budget to return zero. Callers skip them and say why.
    */
   static linkedInViable() {
+    if (searchApi.available) return { ok: true, via: 'searchapi-google' };
+    if (firecrawl.available) return { ok: true, via: 'firecrawl' };
     if (config.SERPER_API_KEY) return { ok: true, via: 'serper-google' };
     if (config.BRAVE_API_KEY) return { ok: true, via: 'brave-api' };
     if (config.SEARCH_ENABLE_GOOGLE && !isResting('google-scrape')) {
@@ -170,6 +173,7 @@ class Search {
   static get providerName() {
     const parts = ['brave-scrape', 'bing-scrape', 'duckduckgo'];
     if (firecrawl.available) parts.unshift('firecrawl');
+    if (searchApi.available) parts.unshift('searchapi-google');
     if (config.SEARCH_ENABLE_GOOGLE) parts.push('google-scrape');
     if (config.BRAVE_API_KEY) parts.unshift('brave-api');
     if (config.SERPER_API_KEY) parts.unshift('serper-google');
@@ -262,6 +266,15 @@ class Search {
    */
   static async _runLinkedInSearch(query, limit, perSource) {
     const sources = [];
+    // Real Google, which is the only index that returns third-party LinkedIn
+    // pages. Worth a credit precisely because no keyless source substitutes.
+    if (searchApi.available) {
+      sources.push({
+        name: 'searchapi-google',
+        run: () => searchApi.search(query, perSource),
+        wasBlocked: () => false
+      });
+    }
     // LinkedIn is the case that suffers most without Google, so a configured
     // Firecrawl goes first here.
     if (firecrawl.available) {

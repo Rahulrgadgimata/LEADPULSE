@@ -284,12 +284,14 @@ const Views = {
   },
 
   getSourceLabel(src) {
-    return { web_scrape: 'Web', linkedin: 'LinkedIn', news: 'News', job_board: 'Jobs', social: 'Social', enrichment: 'Apollo' }[src] || src;
+    return { web_scrape: 'Web', maps: 'Maps', linkedin: 'LinkedIn', news: 'News', job_board: 'Jobs', social: 'Social', import: 'Imported', enrichment: 'Apollo' }[src] || src;
   },
 
   getSourceBadgeClass(src) {
     return {
       web_scrape: 'badge--web',
+      maps: 'badge--web',
+      import: 'badge--web',
       linkedin: 'badge--linkedin',
       news: 'badge--news',
       job_board: 'badge--jobs',
