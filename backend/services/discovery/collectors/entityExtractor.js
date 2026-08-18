@@ -268,6 +268,20 @@ Return ONLY JSON: {"companies":[...]}`;
       return null;
     }
 
+    // The name here is derived from the domain, so it arrives as one
+    // unpunctuated token — "onlinelistmaker.com" becomes "Onlinelistmaker".
+    // _isPlausibleCompanyName works on word boundaries and cannot see inside
+    // that, which is how a run for SaaS companies kept a list-making tool, a
+    // programming tutorial site and a bare "Top" from a listicle URL.
+    if (WEB_TOOL_DOMAIN.test(base)) {
+      logger.debug(`Fallback dropped web-utility domain: ${item.domain}`);
+      return null;
+    }
+    if (GENERIC_DOMAIN_WORDS.has(base.toLowerCase())) {
+      logger.debug(`Fallback dropped generic domain word "${base}": ${item.domain}`);
+      return null;
+    }
+
     const name = base.charAt(0).toUpperCase() + base.slice(1);
     if (!this._isPlausibleCompanyName(name)) return null;
 
@@ -296,6 +310,18 @@ Return ONLY JSON: {"companies":[...]}`;
     }
   }
 }
+
+// The same tool words without word boundaries, for names derived from a domain
+// where nothing separates them ("onlinelistmaker").
+const WEB_TOOL_DOMAIN =
+  /(list|invoice|resume|logo|qr|barcode|pdf|meme|text|image|photo|password|username|url|link|color|font|chart|calendar|timer|counter)\s*-?\s*(maker|generator|builder|creator|converter|editor|shortener|checker|tester|calculator)/i;
+
+// A domain whose whole name is one of these describes a page, not a business.
+const GENERIC_DOMAIN_WORDS = new Set([
+  'top', 'best', 'list', 'lists', 'new', 'news', 'online', 'the', 'my', 'get',
+  'go', 'app', 'apps', 'web', 'site', 'page', 'home', 'info', 'data', 'free',
+  'startup', 'startups', 'company', 'companies', 'business', 'tech', 'blog',
+]);
 
 // Names that describe a free online utility rather than a business.
 const WEB_TOOL_NAMES =

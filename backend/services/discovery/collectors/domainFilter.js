@@ -35,6 +35,13 @@ const NON_PROSPECT_NAMES = new Set([
   'techpowerup', 'windowsforum', 'tomshardware', 'xda-developers', 'howtogeek',
   'geeksforgeeks', 'w3schools', 'tutorialspoint', 'javatpoint', 'coursera',
   'udemy', 'edx', 'khanacademy', 'byjus', 'unacademy',
+  'runoob', 'programiz', 'freecodecamp', 'sitepoint', 'baeldung', 'hackernoon',
+  'hashnode', 'dev', 'digitalocean',
+  // Accelerator and marketplace directories. Their company lists rank first for
+  // "top <industry> startups in <city>", so a run aimed at startups kept
+  // surfacing the directory itself as the prospect.
+  'ycombinator', 'techstars', 'antler', 'seedcamp', 'startupblink',
+  'toptal', 'upwork', 'fiverr', 'freelancer', 'guru', 'peopleperhour',
 ]);
 
 /**
