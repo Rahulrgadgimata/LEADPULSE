@@ -189,7 +189,13 @@ class EnrichmentService {
    */
   static async _fromPublicSite(domain) {
     const host = String(domain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-    const paths = ['', '/about', '/about-us', '/company', '/contact', '/contact-us'];
+    // Ordered by how often each carries a contact address. The legal pages are
+    // last but matter: a company with a form-only contact page frequently still
+    // prints a real address in its imprint or privacy policy.
+    const paths = [
+      '', '/contact', '/contact-us', '/about', '/about-us', '/company',
+      '/team', '/support', '/help', '/imprint', '/impressum', '/legal', '/privacy'
+    ];
     const out = {};
 
     for (const path of paths) {
@@ -438,7 +444,12 @@ function mergePreferExisting(target, source) {
 function isUsefulEmail(email, host) {
   if (!email || !email.includes('@')) return false;
   const lower = email.toLowerCase();
-  if (/noreply|no-reply|donotreply|privacy|support@|help@|webmaster|example\.com/i.test(lower)) {
+  // Only genuinely undeliverable or non-human addresses are refused. An earlier
+  // version also rejected support@ and help@, but for outbound prospecting a
+  // published role address is frequently the only way in — and rejecting them
+  // left companies that do publish a contact looking as though they publish
+  // none.
+  if (/noreply|no-reply|donotreply|do-not-reply|mailer-daemon|postmaster|webmaster|example\.com|sentry\.io|wixpress/i.test(lower)) {
     return false;
   }
   // Retina and sized asset filenames — "icon@400.png", "logo@2x.jpg" — satisfy
@@ -460,9 +471,16 @@ function isUsefulEmail(email, host) {
     const emailDomain = lower.split('@').pop();
     if (!emailDomain) return false;
 
+    // A company often sends from a sibling domain of its own brand —
+    // buttondown.com publishes @buttondown.email, and a strict host match threw
+    // that away as if it belonged to someone else.
+    const brand = base.split('.')[0];
+    const emailBrand = emailDomain.split('.')[0];
+
     const onCompanyDomain = emailDomain === domain ||
       emailDomain.endsWith(`.${base}`) ||
-      emailDomain === base;
+      emailDomain === base ||
+      (brand.length >= 4 && emailBrand === brand);
 
     if (!onCompanyDomain && !FREE_MAIL_DOMAINS.has(emailDomain)) return false;
   }

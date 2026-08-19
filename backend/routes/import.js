@@ -7,6 +7,7 @@ const DiscoveryService = require('../services/discovery');
 const ImportService = require('../services/import');
 const { readSheet } = require('../services/import/sheetReader');
 const config = require('../config/env');
+const { query } = require('../config/database');
 const logger = require('../utils/logger');
 
 const router = express.Router();
@@ -97,7 +98,7 @@ router.post('/leads', upload.single('file'), async (req, res) => {
       triggerType: 'import',
       startText: `Reading ${sheet.rows.length} companies from ${req.file.originalname}...`,
       execute: async jobId => {
-        const stats = await ImportService.run(jobId, {
+        const { stats } = await ImportService.run(jobId, {
           icpId: icp.id,
           rows: sheet.rows,
           updateProgress: updateProgress(jobId)
@@ -122,6 +123,80 @@ router.post('/leads', upload.single('file'), async (req, res) => {
     logger.error('Sheet import failed:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+/**
+ * Per-row outcome of an import: what was found for each company, and what was
+ * looked for and not found. A blank cell in the dashboard cannot distinguish
+ * those two, and the difference is what tells the user whether to go looking
+ * themselves.
+ */
+router.get('/report/:jobId', (req, res) => {
+  const job = query(
+    'SELECT id, status, status_text, result_json FROM discovery_jobs WHERE id = ?',
+    [req.params.jobId]
+  ).rows[0];
+
+  if (!job) return res.status(404).json({ error: 'Import job not found.' });
+  if (!job.result_json) {
+    return res.json({
+      jobId: job.id,
+      status: job.status,
+      ready: false,
+      message: job.status === 'running' || job.status === 'queued'
+        ? 'The import is still running.'
+        : 'No report was recorded for this job.'
+    });
+  }
+
+  const parsed = JSON.parse(job.result_json);
+  res.json({ jobId: job.id, status: job.status, ready: true, summary: job.status_text, ...parsed });
+});
+
+/**
+ * The uploaded list back as a CSV, with the contact columns filled in and an
+ * explicit "not found" wherever the pipeline came up empty — which is the
+ * artefact most people actually want out of an import.
+ */
+router.get('/report/:jobId.csv', (req, res) => {
+  const job = query(
+    'SELECT id, result_json FROM discovery_jobs WHERE id = ?',
+    [req.params.jobId]
+  ).rows[0];
+
+  if (!job || !job.result_json) {
+    return res.status(404).json({ error: 'No finished import report for that job.' });
+  }
+
+  const { rows = [] } = JSON.parse(job.result_json);
+  const header = ['Company', 'Website', 'Email', 'Phone', 'Contact name', 'Job title', 'LinkedIn', 'Result'];
+
+  const escape = value => {
+    const text = value == null ? '' : String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+
+  // "not found" is written into the cell rather than left blank: an empty cell
+  // reads as "not attempted", which is the wrong conclusion.
+  const cell = (entry, label) => entry.found[label] || (entry.status === 'failed' ? 'error' : 'not found');
+
+  const lines = [header.join(',')];
+  for (const entry of rows) {
+    lines.push([
+      entry.company,
+      entry.website || 'not found',
+      cell(entry, 'email'),
+      cell(entry, 'phone'),
+      cell(entry, 'contact name'),
+      cell(entry, 'job title'),
+      cell(entry, 'LinkedIn'),
+      entry.status + (entry.note ? ` — ${entry.note}` : '')
+    ].map(escape).join(','));
+  }
+
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="leadpulse-contacts-${job.id.slice(0, 8)}.csv"`);
+  res.send(lines.join('\n'));
 });
 
 // Multer rejects an oversized file with its own error class; without this the

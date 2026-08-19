@@ -38,6 +38,10 @@ const Import = {
 
   open() {
     document.getElementById('import-modal-overlay')?.classList.remove('hidden');
+    // Coming back for another upload shows the form, not the previous result.
+    const report = document.getElementById('import-report');
+    if (report) { report.innerHTML = ''; report.style.display = 'none'; }
+    document.getElementById('import-form-section')?.setAttribute('style', '');
     this.setStatus('');
     this.syncTargetChoice();
   },
@@ -126,6 +130,86 @@ const Import = {
   },
 
   /**
+   * Reopen the modal with the result of every row: what was found, and what was
+   * searched for and not found. "Not found" is stated outright — an empty cell
+   * reads as "not attempted", which is the wrong conclusion for the user to
+   * draw about their own list.
+   */
+  async showReport(jobId) {
+    let data;
+    try {
+      const res = await fetch(`${this.API_BASE}/api/import/report/${encodeURIComponent(jobId)}`);
+      data = await res.json();
+    } catch (err) {
+      return;
+    }
+    if (!data?.ready || !Array.isArray(data.rows)) return;
+
+    const modal = document.getElementById('import-modal-overlay');
+    const body = document.getElementById('import-report');
+    if (!modal || !body) return;
+
+    const esc = v => String(v == null ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+    const badge = status => {
+      const colour = status === 'complete' ? 'var(--emerald)'
+        : status === 'partial' ? 'var(--amber)'
+        : status === 'failed' ? 'var(--rose, #f43f5e)'
+        : 'var(--text-tertiary)';
+      return `<span style="color:${colour};font-weight:600;">${esc(status)}</span>`;
+    };
+
+    const value = (entry, label) => {
+      const found = entry.found?.[label];
+      if (found) return `<span style="color:var(--text-primary);">${esc(found)}</span>`;
+      return '<span style="color:var(--rose, #f43f5e);opacity:.85;">not found</span>';
+    };
+
+    const rows = data.rows.map(entry => `
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border-glass);">
+          <strong>${esc(entry.company)}</strong>
+          ${entry.website ? `<div style="font-size:.75rem;color:var(--text-tertiary);">${esc(entry.website)}</div>` : ''}
+        </td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border-glass);font-size:.8rem;">${value(entry, 'email')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border-glass);font-size:.8rem;">${value(entry, 'phone')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border-glass);font-size:.8rem;">${value(entry, 'contact name')}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border-glass);font-size:.8rem;">${badge(entry.status)}</td>
+      </tr>`).join('');
+
+    body.innerHTML = `
+      <h3 style="font-size:.9rem;margin:14px 0 6px;">Import result</h3>
+      <p class="icp-intro" style="margin-bottom:10px;">
+        ${esc(data.summary || '')}
+      </p>
+      <div style="max-height:320px;overflow:auto;border:1px solid var(--border-glass);border-radius:10px;">
+        <table style="width:100%;border-collapse:collapse;font-size:.82rem;">
+          <thead>
+            <tr style="position:sticky;top:0;background:var(--bg-surface);">
+              <th style="text-align:left;padding:8px;">Company</th>
+              <th style="text-align:left;padding:8px;">Email</th>
+              <th style="text-align:left;padding:8px;">Phone</th>
+              <th style="text-align:left;padding:8px;">Contact</th>
+              <th style="text-align:left;padding:8px;">Result</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:12px;">
+        <a class="btn btn--primary" style="flex:2;text-align:center;text-decoration:none;"
+           href="${this.API_BASE}/api/import/report/${encodeURIComponent(jobId)}.csv">Download as CSV</a>
+        <button class="btn btn--secondary" id="btn-close-report" type="button" style="flex:1;">Close</button>
+      </div>`;
+
+    body.style.display = '';
+    document.getElementById('import-form-section')?.setAttribute('style', 'display:none;');
+    modal.classList.remove('hidden');
+    document.getElementById('btn-close-report')?.addEventListener('click', () => this.close());
+  },
+
+  /**
    * Follow the import on the same toast discovery uses, so both kinds of run
    * report progress in one familiar place.
    */
@@ -173,6 +257,10 @@ const Import = {
           if (bar) bar.style.width = '0%';
           if (title) title.textContent = 'Running Multi-Source AI Pipeline...';
         }, 4000);
+
+        // Show the per-row outcome. A blank email in the table cannot say
+        // whether anyone looked; this can.
+        await this.showReport(jobId);
       }
     }, 2000);
   }

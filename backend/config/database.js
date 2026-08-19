@@ -184,6 +184,13 @@ function init() {
   try {
     db.prepare("ALTER TABLE discovery_jobs ADD COLUMN last_progress_at TEXT").run();
   } catch (e) {}
+  // Per-row outcome of a spreadsheet import: which contact details were found
+  // for each company and which were not. Kept on the job rather than the lead
+  // because it describes one run's attempt, and the user needs to see "we
+  // looked and did not find an email" as distinct from "we never looked".
+  try {
+    db.prepare("ALTER TABLE discovery_jobs ADD COLUMN result_json TEXT").run();
+  } catch (e) {}
 
   // Review state is deliberately separate from `status`. `status` tracks where
   // a lead sits in the discovery pipeline ('new' → 'scored'); review_status

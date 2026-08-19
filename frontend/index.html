@@ -824,6 +824,7 @@
                 <button class="modal__close" id="import-modal-close">&times;</button>
             </div>
             <div class="modal__body">
+              <div id="import-form-section">
                 <p class="icp-intro">
                     Upload an .xlsx, .xls or .csv of companies. Every row is looked up on the web
                     for an email, phone, LinkedIn page and a named decision maker. Columns are
@@ -858,6 +859,11 @@
                     <button class="btn btn--primary" id="btn-start-import" type="button" style="flex:2;">Find contact details</button>
                     <button class="btn btn--secondary" id="btn-cancel-import" type="button" style="flex:1;">Cancel</button>
                 </div>
+              </div>
+
+              <!-- Filled in once the import finishes: one row per company,
+                   saying what was found and what was not. -->
+              <div id="import-report" style="display:none;"></div>
             </div>
         </div>
     </div>
