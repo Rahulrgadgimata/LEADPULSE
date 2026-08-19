@@ -144,34 +144,10 @@ router.post('/leads', upload.single('file'), async (req, res) => {
 });
 
 /**
- * Per-row outcome of an import: what was found for each company, and what was
- * looked for and not found. A blank cell in the dashboard cannot distinguish
- * those two, and the difference is what tells the user whether to go looking
- * themselves.
- */
-router.get('/report/:jobId', async (req, res) => {
-  const job = (await query(
-    'SELECT id, status, status_text, result_json FROM discovery_jobs WHERE id = ?',
-    [req.params.jobId]
-  )).rows[0];
-
-  if (!job) return res.status(404).json({ error: 'Import job not found.' });
-  if (!job.result_json) {
-    return res.json({
-      jobId: job.id,
-      status: job.status,
-      ready: false,
-      message: job.status === 'running' || job.status === 'queued'
-        ? 'The import is still running.'
-        : 'No report was recorded for this job.'
-    });
-  }
-
-  const parsed = JSON.parse(job.result_json);
-  res.json({ jobId: job.id, status: job.status, ready: true, summary: job.status_text, ...parsed });
-});
-
-/**
+ * Declared before `/report/:jobId` on purpose: that route's parameter matches
+ * "<id>.csv" too, so registering it first made every download look up a job id
+ * with an extension on the end and 404.
+ *
  * The uploaded list back as a CSV, with the contact columns filled in and an
  * explicit "not found" wherever the pipeline came up empty — which is the
  * artefact most people actually want out of an import.
@@ -230,6 +206,34 @@ router.get('/report/:jobId.csv', async (req, res) => {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="leadpulse-contacts-${job.id.slice(0, 8)}.csv"`);
   res.send(lines.join('\n'));
+});
+
+/**
+ * Per-row outcome of an import: what was found for each company, and what was
+ * looked for and not found. A blank cell in the dashboard cannot distinguish
+ * those two, and the difference is what tells the user whether to go looking
+ * themselves.
+ */
+router.get('/report/:jobId', async (req, res) => {
+  const job = (await query(
+    'SELECT id, status, status_text, result_json FROM discovery_jobs WHERE id = ?',
+    [req.params.jobId]
+  )).rows[0];
+
+  if (!job) return res.status(404).json({ error: 'Import job not found.' });
+  if (!job.result_json) {
+    return res.json({
+      jobId: job.id,
+      status: job.status,
+      ready: false,
+      message: job.status === 'running' || job.status === 'queued'
+        ? 'The import is still running.'
+        : 'No report was recorded for this job.'
+    });
+  }
+
+  const parsed = JSON.parse(job.result_json);
+  res.json({ jobId: job.id, status: job.status, ready: true, summary: job.status_text, ...parsed });
 });
 
 // Multer rejects an oversized file with its own error class; without this the

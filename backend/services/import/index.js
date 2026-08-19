@@ -293,6 +293,72 @@ class ImportService {
   }
 
   /**
+   * The pages worth reading for contact details, through the same fetch chain
+   * enrichment uses — Scrapling, then plain HTTP, then Firecrawl rendering — so
+   * a JavaScript-only or WAF-fronted site still yields something.
+   */
+  static async _fetchPages(domain) {
+    const host = String(domain).replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
+    const pages = [];
+
+    for (const path of ['', '/contact', '/about', '/team']) {
+      if (runBudget.expired() || pages.length >= 3) break;
+      try {
+        const page = await EnrichmentService._fetchHtml(`https://${host}${path}`);
+        if (page?.html) pages.push({ url: `${host}${path}`, html: page.html });
+      } catch (err) {
+        // A site without /team is the normal case, not a failure to report.
+      }
+    }
+    return pages;
+  }
+
+  /**
+   * Write what the model found: known details go to their columns, anything
+   * else the user asked for is kept as JSON beside the lead.
+   *
+   * Existing values win — the sheet's own data and the earlier, more reliable
+   * extraction paths are never overwritten by a later inference.
+   */
+  static async _applyExtraction(leadId, found, current) {
+    const updates = [];
+    const params = [];
+    const custom = {};
+
+    for (const [field, value] of Object.entries(found)) {
+      const column = toKnownField(field);
+      if (column && !current[column]) {
+        updates.push(`${column} = ?`);
+        params.push(
+          column === 'company_size'
+            ? parseInt(String(value).replace(/[^\d]/g, ''), 10) || null
+            : value
+        );
+      } else if (!column) {
+        custom[field] = value;
+      }
+    }
+
+    if (Object.keys(custom).length > 0) {
+      let existing = {};
+      try {
+        existing = current.extracted_json ? JSON.parse(current.extracted_json) : {};
+      } catch (err) {
+        existing = {};
+      }
+      updates.push('extracted_json = ?');
+      params.push(JSON.stringify({ ...existing, ...custom }));
+    }
+
+    if (updates.length === 0) return;
+
+    updates.push('updated_at = ?');
+    params.push(new Date().toISOString(), leadId);
+    await query(`UPDATE leads SET ${updates.join(', ')} WHERE id = ?`, params);
+  }
+
+
+  /**
    * Human summary for the job row and the dashboard toast.
    *
    * States what was not found as plainly as what was: a row the pipeline
