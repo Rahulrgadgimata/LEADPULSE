@@ -1,22 +1,26 @@
 /* ═════════════════════════════════════════════════════════════
    LeadPulse AI — Clean Light Design System
-   Soft teal / slate SaaS dashboard for client demos
+   Deep-blue accent, matching the landing page (css/landing.css)
+   so crossing from one to the other is seamless. Only the colour
+   tokens changed; every layout and component rule is untouched.
    ═════════════════════════════════════════════════════════════ */
 
 :root {
   /* Color Tokens */
-  --bg-deep: #f0f4f8;
-  --bg-surface: #f7fafc;
+  --bg-deep: #f7f9fc;
+  --bg-surface: #fbfcfe;
   --bg-card: #ffffff;
-  --bg-card-hover: #f8fafc;
+  --bg-card-hover: #f7f9fc;
   --bg-elevated: #ffffff;
   --bg-input: #ffffff;
 
-  /* Accent Colors — teal / sky, no purple */
-  --cyan: #0d9488;
-  --cyan-glow: rgba(13, 148, 136, 0.18);
-  --indigo: #0284c7;
-  --violet: #0369a1;
+  /* Accent Colors — the landing page's brand blue.
+     The variables keep their old names so no component rule has to
+     change; only the values behind them moved from teal to blue. */
+  --cyan: #0052cc;
+  --cyan-glow: rgba(0, 82, 204, 0.16);
+  --indigo: #2563eb;
+  --violet: #003d99;
   --emerald: #059669;
   --emerald-glow: rgba(5, 150, 105, 0.18);
   --amber: #d97706;
@@ -35,7 +39,7 @@
   /* Borders & Glass */
   --border-glass: rgba(15, 23, 42, 0.08);
   --border-glass-hover: rgba(15, 23, 42, 0.16);
-  --border-cyan: rgba(13, 148, 136, 0.35);
+  --border-cyan: rgba(0, 82, 204, 0.35);
 
   /* Text Colors */
   --text-primary: #0f172a;
@@ -44,11 +48,11 @@
   --text-muted: #94a3b8;
 
   /* Gradients */
-  --grad-primary: linear-gradient(135deg, #0d9488 0%, #0284c7 100%);
+  --grad-primary: linear-gradient(135deg, #0052cc 0%, #3b82f6 100%);
   --grad-hot: linear-gradient(135deg, #10b981, #059669);
   --grad-warm: linear-gradient(135deg, #f59e0b, #d97706);
   --grad-cold: linear-gradient(135deg, #f43f5e, #e11d48);
-  --grad-card-glow: radial-gradient(circle at 50% 0%, rgba(13, 148, 136, 0.06), transparent 70%);
+  --grad-card-glow: radial-gradient(circle at 50% 0%, rgba(0, 82, 204, 0.06), transparent 70%);
 
   /* Radius & Shadows */
   --radius-sm: 8px;
@@ -56,7 +60,7 @@
   --radius-lg: 16px;
   --radius-full: 9999px;
   --shadow-card: 0 4px 24px rgba(15, 23, 42, 0.06);
-  --shadow-glow: 0 8px 28px rgba(13, 148, 136, 0.15);
+  --shadow-glow: 0 8px 28px rgba(0, 82, 204, 0.15);
 
   /* Layout chrome (sticky header + nav) */
   --header-height: 64px;
@@ -91,7 +95,7 @@ body::before {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at 12% 10%, rgba(13, 148, 136, 0.08) 0%, transparent 42%),
+    radial-gradient(circle at 12% 10%, rgba(0, 82, 204, 0.08) 0%, transparent 42%),
     radial-gradient(circle at 88% 18%, rgba(2, 132, 199, 0.07) 0%, transparent 40%),
     radial-gradient(circle at 50% 90%, rgba(5, 150, 105, 0.05) 0%, transparent 45%);
   pointer-events: none;
@@ -114,22 +118,22 @@ body::before {
 }
 .btn--primary {
   background: var(--grad-primary); color: #fff;
-  box-shadow: 0 4px 14px rgba(13, 148, 136, 0.28);
+  box-shadow: 0 4px 14px rgba(0, 82, 204, 0.28);
 }
 .btn--primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 20px rgba(13, 148, 136, 0.38);
+  box-shadow: 0 6px 20px rgba(0, 82, 204, 0.38);
 }
 
 .btn--discovery {
-  background: linear-gradient(135deg, #0d9488, #0284c7);
+  background: linear-gradient(135deg, #0052cc, #0284c7);
   color: #fff; padding: 9px 18px; border-radius: var(--radius-full);
   position: relative; overflow: hidden;
-  box-shadow: 0 4px 16px rgba(13, 148, 136, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 82, 204, 0.3);
 }
 .btn--discovery:hover {
   transform: scale(1.03);
-  box-shadow: 0 6px 22px rgba(13, 148, 136, 0.4);
+  box-shadow: 0 6px 22px rgba(0, 82, 204, 0.4);
 }
 .btn__pulse {
   position: absolute; width: 6px; height: 6px; border-radius: 50%;
@@ -151,7 +155,7 @@ body::before {
   color: var(--text-secondary); display: flex; align-items: center; justify-content: center;
   cursor: pointer; transition: all 0.2s ease;
 }
-.icon-btn:hover { color: var(--cyan); border-color: var(--cyan); background: rgba(13, 148, 136, 0.08); }
+.icon-btn:hover { color: var(--cyan); border-color: var(--cyan); background: rgba(0, 82, 204, 0.08); }
 
 /* ─── Header Command Bar ────────────────────────────── */
 .header {
@@ -181,8 +185,8 @@ body::before {
 }
 .brand__badge {
   font-size: 0.6rem; padding: 2px 6px; border-radius: 4px;
-  background: rgba(13, 148, 136, 0.12); color: var(--cyan);
-  border: 1px solid rgba(13, 148, 136, 0.25); font-weight: 700;
+  background: rgba(0, 82, 204, 0.12); color: var(--cyan);
+  border: 1px solid rgba(0, 82, 204, 0.25); font-weight: 700;
   margin-left: 4px; -webkit-text-fill-color: initial;
 }
 .brand__status {
@@ -215,7 +219,7 @@ body::before {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 .command-search:focus-within {
-  border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12);
+  border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(0, 82, 204, 0.12);
 }
 .command-search__icon { color: var(--text-tertiary); flex-shrink: 0; }
 .command-search__input {
@@ -261,7 +265,7 @@ body::before {
 .metric-card__icon {
   width: 36px; height: 36px; border-radius: var(--radius-md);
   display: flex; align-items: center; justify-content: center;
-  background: rgba(13, 148, 136, 0.08); color: var(--cyan);
+  background: rgba(0, 82, 204, 0.08); color: var(--cyan);
 }
 .metric-card--hot .metric-card__icon { color: var(--emerald); background: var(--tier-hot-bg); }
 .metric-card--warm .metric-card__icon { color: var(--amber); background: var(--tier-warm-bg); }
@@ -302,8 +306,8 @@ body::before {
 }
 .nav-tab:hover { color: var(--text-primary); background: rgba(15, 23, 42, 0.04); }
 .nav-tab.active {
-  color: var(--cyan); background: rgba(13, 148, 136, 0.1);
-  border-color: rgba(13, 148, 136, 0.28);
+  color: var(--cyan); background: rgba(0, 82, 204, 0.1);
+  border-color: rgba(0, 82, 204, 0.28);
 }
 .nav-tab__pill {
   font-size: 0.6rem; padding: 2px 6px; border-radius: 10px;
@@ -323,7 +327,7 @@ body::before {
   display: flex; align-items: center; justify-content: center;
 }
 .view-switch__btn:hover { color: var(--text-primary); }
-.view-switch__btn.active { color: var(--cyan); background: rgba(13, 148, 136, 0.12); }
+.view-switch__btn.active { color: var(--cyan); background: rgba(0, 82, 204, 0.12); }
 
 /* ─── Workspace Layout ──────────────────────────────── */
 .workspace { display: flex; min-height: calc(100vh - var(--sticky-chrome-height)); }
@@ -356,7 +360,7 @@ body::before {
   cursor: pointer; transition: all 0.15s ease;
 }
 .chip:hover { border-color: var(--border-glass-hover); color: var(--text-primary); }
-.chip.active { background: rgba(13, 148, 136, 0.12); border-color: var(--cyan); color: var(--cyan); }
+.chip.active { background: rgba(0, 82, 204, 0.12); border-color: var(--cyan); color: var(--cyan); }
 .chip--hot.active { background: var(--tier-hot-bg); border-color: var(--emerald); color: var(--emerald); }
 .chip--warm.active { background: var(--tier-warm-bg); border-color: var(--amber); color: var(--amber); }
 .chip--cold.active { background: var(--tier-cold-bg); border-color: var(--rose); color: var(--rose); }
@@ -410,8 +414,8 @@ body::before {
 .lead-card-new__signals { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; }
 .signal-pill {
   font-size: 0.68rem; padding: 2px 8px; border-radius: 4px;
-  background: rgba(13, 148, 136, 0.08); color: var(--cyan);
-  border: 1px solid rgba(13, 148, 136, 0.2); font-weight: 500;
+  background: rgba(0, 82, 204, 0.08); color: var(--cyan);
+  border: 1px solid rgba(0, 82, 204, 0.2); font-weight: 500;
 }
 
 .lead-card-new__bottom {
@@ -437,7 +441,7 @@ body::before {
   padding: 12px 16px; font-size: 0.85rem; border-bottom: 1px solid var(--border-glass);
   vertical-align: middle;
 }
-.leads-table tr:hover td { background: rgba(13, 148, 136, 0.04); cursor: pointer; }
+.leads-table tr:hover td { background: rgba(0, 82, 204, 0.04); cursor: pointer; }
 
 /* ─── Split View Mode ───────────────────────────────── */
 .split-view { display: grid; grid-template-columns: 360px 1fr; gap: 16px; height: calc(100vh - var(--sticky-chrome-height) - 48px); }
@@ -526,7 +530,7 @@ body::before {
 .chat-msg {
   padding: 12px 16px; border-radius: var(--radius-md); font-size: 0.88rem; max-width: 85%;
 }
-.chat-msg.assistant { background: rgba(13, 148, 136, 0.08); border: 1px solid rgba(13, 148, 136, 0.18); color: var(--text-primary); align-self: flex-start; }
+.chat-msg.assistant { background: rgba(0, 82, 204, 0.08); border: 1px solid rgba(0, 82, 204, 0.18); color: var(--text-primary); align-self: flex-start; }
 .chat-msg.user { background: var(--indigo); color: #fff; align-self: flex-end; }
 
 .chat-input-bar { display: flex; gap: 10px; }
@@ -570,7 +574,7 @@ body::before {
   border: 1px solid var(--border-glass); border-radius: var(--radius-sm);
   color: var(--text-primary); font-size: 0.85rem; outline: none; margin-bottom: 8px;
 }
-.config-input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.12); }
+.config-input:focus { border-color: var(--cyan); box-shadow: 0 0 0 3px rgba(0, 82, 204, 0.12); }
 .status-indicator { font-size: 0.75rem; color: var(--text-tertiary); }
 
 /* ─── ICP Manager Modal Styling ──────────────────────── */
@@ -585,7 +589,7 @@ body::before {
   background: #fff; border: 1px solid var(--border-glass); color: var(--text-secondary);
   font-size: 0.75rem; padding: 5px 11px; border-radius: var(--radius-full); cursor: pointer; transition: all 0.2s ease;
 }
-.icp-preset-btn:hover { background: rgba(13, 148, 136, 0.1); border-color: var(--cyan); color: var(--cyan); }
+.icp-preset-btn:hover { background: rgba(0, 82, 204, 0.1); border-color: var(--cyan); color: var(--cyan); }
 .icp-preset-btn.active { background: var(--grad-primary); border-color: transparent; color: #fff; font-weight: 600; }
 
 .form-row { display: flex; gap: 12px; margin-bottom: 12px; }
@@ -790,7 +794,7 @@ body::before {
 
 .composer-notice { margin-bottom: 12px; padding: 10px 13px; border-radius: var(--radius-md); font-size: 0.8rem; line-height: 1.5; }
 .composer-notice:empty { display: none; }
-.composer-notice--info { background: rgba(13, 148, 136, 0.08); border: 1px solid rgba(13, 148, 136, 0.25); color: var(--text-secondary); }
+.composer-notice--info { background: rgba(0, 82, 204, 0.08); border: 1px solid rgba(0, 82, 204, 0.25); color: var(--text-secondary); }
 .composer-notice--warn { background: var(--tier-warm-bg); border: 1px solid rgba(217, 119, 6, 0.3); color: var(--amber); }
 .composer-notice--bad  { background: var(--tier-cold-bg); border: 1px solid rgba(225, 29, 72, 0.3); color: var(--rose); }
 

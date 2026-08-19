@@ -1,0 +1,895 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LeadPulse AI — Autonomous Sales Prospecting & Intelligence</title>
+    <meta name="description" content="Next-generation AI outbound sales platform. Autonomous lead discovery, 5-dimension scoring, and Groq LLM intelligence.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Chart.js is vendored locally: the CDN copy was blocked by this app's
+         Content-Security-Policy, and a self-hosted copy also removes a runtime
+         dependency on a third-party CDN. -->
+    <script src="vendor/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="light-theme">
+    <!-- ═══ Top Command Bar Header ═══ -->
+    <header class="header" id="header">
+        <div class="header__left">
+            <div class="brand" id="brand">
+                <div class="brand__logo-wrapper">
+                    <div class="brand__pulse-ring"></div>
+                    <svg width="34" height="34" viewBox="0 0 34 34" fill="none">
+                        <rect width="34" height="34" rx="10" fill="url(#brandGrad)"/>
+                        <path d="M11 23V11l6-4 6 4v12l-6 4-6-4z" stroke="#fff" stroke-width="2" fill="none"/>
+                        <circle cx="17" cy="17" r="3.5" fill="#0d9488"/>
+                        <path d="M17 13.5v-3M17 20.5v3M13.5 17h-3M20.5 17h3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                        <defs>
+                            <linearGradient id="brandGrad" x1="0" y1="0" x2="34" y2="34">
+                                <stop stop-color="#0d9488"/>
+                                <stop offset="1" stop-color="#0284c7"/>
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
+                <div class="brand__info">
+                    <span class="brand__name">LEADPULSE <span class="brand__badge">AI OS</span></span>
+                    <span class="brand__status"><span class="status-dot"></span> <span id="engine-status-label">Connecting…</span></span>
+                </div>
+            </div>
+
+            <!-- Active ICP Selector -->
+            <div class="icp-selector" id="icp-selector">
+                <span class="icp-selector__label">FINDING:</span>
+                <button class="icp-selector__btn" id="btn-icp-select">
+                    <span class="icp-selector__name" id="current-icp-name">US B2B SaaS Enterprise CTOs</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="header__center">
+            <div class="command-search" id="command-search">
+                <svg class="command-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" class="command-search__input" id="search-input" placeholder="Search leads by company, title, industry, or signal (e.g. 'hiring devops')...">
+                <span class="command-search__shortcut"><kbd>⌘</kbd><kbd>K</kbd></span>
+            </div>
+        </div>
+
+        <div class="header__right">
+            <button class="btn btn--secondary" id="btn-upload-sheet" title="Upload a spreadsheet of companies and find their contact details">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                <span>Upload Sheet</span>
+            </button>
+
+            <button class="btn btn--discovery" id="btn-run-discovery">
+                <span class="btn__pulse"></span>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+                </svg>
+                <span>Find Leads</span>
+            </button>
+
+            <button class="icon-btn" id="btn-settings" title="Engine Settings">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/>
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- ═══ Hero Metrics Grid ═══ -->
+    <div class="metrics-container" id="metrics-container">
+        <div class="metric-card metric-card--total" id="metric-total">
+            <div class="metric-card__glow"></div>
+            <div class="metric-card__header">
+                <span class="metric-card__title">Total Leads Streamed</span>
+                <div class="metric-card__icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75"/></svg>
+                </div>
+            </div>
+            <div class="metric-card__body">
+                <span class="metric-card__value" id="stat-total-count">0</span>
+                <div class="metric-card__trend positive">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    <span id="leads-trend"></span>
+                </div>
+            </div>
+            <div class="metric-card__footer" id="dedup-footer">Deduplicated across all discovery channels</div>
+        </div>
+
+        <div class="metric-card metric-card--hot" id="metric-hot">
+            <div class="metric-card__glow"></div>
+            <div class="metric-card__header">
+                <span class="metric-card__title">Hot Tier Leads (70-100)</span>
+                <div class="metric-card__icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2c.9 5.2 5 8 5 12a5 5 0 01-10 0c0-4 4.1-6.8 5-12z"/></svg>
+                </div>
+            </div>
+            <div class="metric-card__body">
+                <span class="metric-card__value text-hot" id="stat-hot-count">0</span>
+                <div class="metric-card__trend positive">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+                    <span id="stat-hot-pct">0% of total pipeline</span>
+                </div>
+            </div>
+            <div class="metric-card__footer">Ready for high-intent outreach</div>
+        </div>
+
+        <div class="metric-card metric-card--warm" id="metric-warm">
+            <div class="metric-card__glow"></div>
+            <div class="metric-card__header">
+                <span class="metric-card__title">Warm Nurture Leads (40-69)</span>
+                <div class="metric-card__icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+                </div>
+            </div>
+            <div class="metric-card__body">
+                <span class="metric-card__value text-warm" id="stat-warm-count">0</span>
+                <div class="metric-card__trend neutral">
+                    <span>Moderate signals detected</span>
+                </div>
+            </div>
+            <div class="metric-card__footer">Enriching contact intelligence</div>
+        </div>
+
+        <div class="metric-card metric-card--score" id="metric-score">
+            <div class="metric-card__glow"></div>
+            <div class="metric-card__header">
+                <span class="metric-card__title">Avg Pipeline ICP Match</span>
+                <div class="metric-card__icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                </div>
+            </div>
+            <div class="metric-card__body">
+                <span class="metric-card__value text-score" id="stat-avg-score">0</span>
+                <div class="metric-card__trend positive">
+                    <span>5-Dimension AI Score</span>
+                </div>
+            </div>
+            <div class="metric-card__footer" id="scoring-engine-label">5-dimension weighted scoring</div>
+        </div>
+    </div>
+
+    <!-- ═══ Navigation Tabs & Controls ═══ -->
+    <div class="nav-bar">
+        <div class="nav-tabs" id="nav-tabs">
+            <button class="nav-tab active" data-tab="feed" id="tab-feed">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <span>Lead Intelligence Feed</span>
+            </button>
+            <button class="nav-tab" data-tab="radar" id="tab-radar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+                <span>Discovery Stream Radar</span>
+                <span class="nav-tab__pill">LIVE</span>
+            </button>
+            <button class="nav-tab" data-tab="analytics" id="tab-analytics">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+                <span>Scoring Analytics</span>
+            </button>
+            <button class="nav-tab" data-tab="outreach" id="tab-outreach">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><polyline points="4 6 12 13 20 6"/></svg>
+                <span>Outreach</span>
+                <span class="nav-tab__pill" id="outreach-tab-count" hidden>0</span>
+            </button>
+            <button class="nav-tab" data-tab="ai-assistant" id="tab-ai-assistant">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a10 10 0 0 1 10 10c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2z"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>
+                <span>Groq AI Copilot</span>
+            </button>
+        </div>
+
+        <div class="nav-actions">
+            <!-- View Mode Switcher -->
+            <div class="view-switch" id="view-switch">
+                <button class="view-switch__btn active" data-mode="grid" title="Card Grid View">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                </button>
+                <button class="view-switch__btn" data-mode="table" title="Data Table View">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+                </button>
+                <button class="view-switch__btn" data-mode="split" title="Split Inspection View">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                </button>
+            </div>
+
+            <!-- Add a lead the AI did not find -->
+            <button class="btn btn--secondary" id="btn-add-lead" title="Add a lead you found yourself">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                <span>Add lead</span>
+            </button>
+
+            <!-- Export Button -->
+            <button class="btn btn--secondary" id="btn-export">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                <span>Export CSV</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- ═══ Bulk Action Bar — appears once leads are selected ═══ -->
+    <div class="bulk-bar hidden" id="bulk-bar">
+        <div class="bulk-bar__count">
+            <strong id="bulk-count">0</strong> selected
+        </div>
+        <div class="bulk-bar__actions">
+            <button class="btn btn--accept" data-bulk="accepted">✓ Accept</button>
+            <button class="btn btn--hold" data-bulk="hold">⏸ Hold</button>
+            <button class="btn btn--reject" data-bulk="rejected">✕ Reject</button>
+            <span class="bulk-bar__divider"></span>
+            <button class="btn btn--secondary" id="btn-bulk-select-hot">Select all Hot</button>
+            <button class="btn btn--secondary" id="btn-bulk-select-all">Select all shown</button>
+            <button class="btn btn--secondary" id="btn-bulk-clear">Clear</button>
+        </div>
+    </div>
+
+    <!-- ═══ Main Workspace ═══ -->
+    <div class="workspace">
+        <!-- ═══ Filter Sidebar ═══ -->
+        <aside class="filter-sidebar" id="filter-sidebar">
+            <div class="filter-sidebar__header">
+                <span class="filter-sidebar__title">INTELLIGENCE FILTERS</span>
+                <button class="filter-sidebar__reset" id="btn-clear-filters">Reset All</button>
+            </div>
+
+            <!-- Review Queue — the decision the dashboard exists to capture -->
+            <div class="filter-block">
+                <label class="filter-block__label">REVIEW QUEUE</label>
+                <div class="chip-group" id="filter-review"></div>
+            </div>
+
+            <!-- Tier Filter -->
+            <div class="filter-block">
+                <label class="filter-block__label">LEAD TIER</label>
+                <div class="chip-group" id="filter-tiers">
+                    <button class="chip chip--hot" data-group="tier" data-value="hot">🔥 Hot (70-100)</button>
+                    <button class="chip chip--warm" data-group="tier" data-value="warm">🌤️ Warm (40-69)</button>
+                    <button class="chip chip--cold" data-group="tier" data-value="cold">❄️ Cold (0-39)</button>
+                </div>
+            </div>
+
+            <!-- Date Discovered -->
+            <div class="filter-block">
+                <label class="filter-block__label">DATE DISCOVERED</label>
+                <div class="chip-group" id="filter-dates">
+                    <button class="chip" data-group="date" data-value="1">Today</button>
+                    <button class="chip" data-group="date" data-value="7">Last 7 days</button>
+                    <button class="chip" data-group="date" data-value="30">Last 30 days</button>
+                </div>
+            </div>
+
+            <!-- Signal Source Filter -->
+            <div class="filter-block">
+                <label class="filter-block__label">DISCOVERY CHANNEL</label>
+                <div class="chip-group" id="filter-sources">
+                    <button class="chip" data-group="source" data-value="web_scrape">Web</button>
+                    <button class="chip" data-group="source" data-value="linkedin">LinkedIn</button>
+                    <button class="chip" data-group="source" data-value="news">News</button>
+                    <button class="chip" data-group="source" data-value="job_board">Jobs</button>
+                    <button class="chip" data-group="source" data-value="social">Social</button>
+                </div>
+            </div>
+
+            <!-- Industry Filter -->
+            <div class="filter-block">
+                <label class="filter-block__label">INDUSTRY</label>
+                <div class="chip-group" id="filter-industries"></div>
+            </div>
+
+            <!-- Geography Filter — built from the countries actually in the data -->
+            <div class="filter-block">
+                <label class="filter-block__label">GEOGRAPHY</label>
+                <div class="chip-group" id="filter-geos"></div>
+            </div>
+
+            <!-- Company Size Filter -->
+            <div class="filter-block">
+                <label class="filter-block__label">COMPANY SIZE</label>
+                <div class="chip-group" id="filter-sizes">
+                    <button class="chip" data-group="size" data-value="1-50">1-50 employees</button>
+                    <button class="chip" data-group="size" data-value="51-200">51-200 employees</button>
+                    <button class="chip" data-group="size" data-value="201-500">201-500 employees</button>
+                    <button class="chip" data-group="size" data-value="501-10000">500+ employees</button>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ═══ Tab Panels Content ═══ -->
+        <main class="main-content" id="main-content">
+            <!-- TAB 1: Lead Intelligence Feed -->
+            <div class="tab-panel active" id="panel-feed">
+                <div class="channel-mix" id="channel-mix" aria-label="Leads by discovery channel"></div>
+                <!-- Grid View Container -->
+                <div class="view-mode-container" id="view-grid-container">
+                    <div class="leads-grid" id="leads-grid"></div>
+                </div>
+
+                <!-- Table View Container -->
+                <div class="view-mode-container hidden" id="view-table-container">
+                    <div class="table-card">
+                        <table class="leads-table" id="leads-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:32px;"><input type="checkbox" id="table-select-all" title="Select every lead shown"></th>
+                                    <th>RANK</th>
+                                    <th class="sortable" data-sort="company_name">COMPANY</th>
+                                    <th class="sortable" data-sort="contact_name">DECISION MAKER</th>
+                                    <th class="sortable" data-sort="total_score">AI MATCH SCORE</th>
+                                    <th class="sortable" data-sort="tier">TIER</th>
+                                    <th class="sortable" data-sort="source">CHANNEL</th>
+                                    <th>REVIEW</th>
+                                    <th>DECISION</th>
+                                </tr>
+                            </thead>
+                            <tbody id="leads-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Split View Container -->
+                <div class="view-mode-container hidden" id="view-split-container">
+                    <div class="split-view">
+                        <div class="split-view__list" id="split-list"></div>
+                        <div class="split-view__inspector" id="split-inspector">
+                            <div class="empty-state">Select a lead to inspect AI scoring breakdown</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: Discovery Stream Radar -->
+            <div class="tab-panel" id="panel-radar">
+                <div class="radar-layout">
+                    <div class="radar-card">
+                        <div class="radar-card__header">
+                            <h3>📡 Live Discovery Signal Stream</h3>
+                            <span class="live-tag"><span class="pulse-dot"></span> STREAMING PUBLIC SOURCES</span>
+                        </div>
+                        <div class="stream-feed" id="stream-feed"></div>
+                    </div>
+
+                    <div class="sources-card">
+                        <h3>Discovery channels</h3>
+                        <div class="channel-list">
+                            <div class="channel-item">
+                                <span class="channel-item__icon">🌐</span>
+                                <div class="channel-item__info">
+                                    <strong>Google + Brave + DuckDuckGo</strong>
+                                    <span>Public web search merged for ICP matches</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">🔗</span>
+                                <div class="channel-item__info">
+                                    <strong>LinkedIn Companies</strong>
+                                    <span>Public company pages &amp; firmographics</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">👤</span>
+                                <div class="channel-item__info">
+                                    <strong>LinkedIn Buyers</strong>
+                                    <span>Public decision-maker titles matching ICP</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">📰</span>
+                                <div class="channel-item__info">
+                                    <strong>News &amp; PR</strong>
+                                    <span>Funding, hiring, expansion coverage</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">💼</span>
+                                <div class="channel-item__info">
+                                    <strong>Job Postings</strong>
+                                    <span>Hiring signals from public boards</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                            <div class="channel-item">
+                                <span class="channel-item__icon">💬</span>
+                                <div class="channel-item__info">
+                                    <strong>Social Intent</strong>
+                                    <span>X / Reddit when API keys are set</span>
+                                </div>
+                                <span class="badge badge--success">ACTIVE</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 3: Scoring Analytics -->
+            <div class="tab-panel" id="panel-analytics">
+                <div class="analytics-layout">
+                    <div class="chart-card">
+                        <h3>5-Dimension Weight Model</h3>
+                        <p>How LeadPulse AI ranks incoming leads</p>
+                        <canvas id="chart-radar-dimensions"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <h3>Lead Tier Distribution</h3>
+                        <p>Hot vs Warm vs Cold conversion funnel</p>
+                        <canvas id="chart-tier-donut"></canvas>
+                    </div>
+                    <div class="chart-card chart-card--wide">
+                        <h3>Score Distribution Histogram</h3>
+                        <p>Frequency of lead scores across all discovered prospects</p>
+                        <canvas id="chart-score-bar"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 4: AI Outreach & Message Engine -->
+            <div class="tab-panel" id="panel-outreach">
+                <div class="outreach-header">
+                    <div class="outreach-engine" id="outreach-engine-line">Checking the message engine…</div>
+                    <div class="outreach-subtabs" id="outreach-subtabs">
+                        <button class="outreach-subtab active" data-sub="queue">Ready to contact</button>
+                        <button class="outreach-subtab" data-sub="drafts">Drafts &amp; scheduled</button>
+                        <button class="outreach-subtab" data-sub="sent">Sent log</button>
+                        <button class="outreach-subtab" data-sub="templates">Templates</button>
+                        <button class="outreach-subtab" data-sub="optout">Opt-outs</button>
+                    </div>
+                </div>
+
+                <!-- Accepted leads waiting for a first message -->
+                <div class="outreach-pane" id="outreach-pane-queue">
+                    <p class="outreach-hint">
+                        Leads you accepted in the review dashboard. Generate a first-touch message,
+                        edit it, then send or schedule — nothing is ever sent without your review.
+                    </p>
+                    <div id="outreach-queue-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Drafts and scheduled -->
+                <div class="outreach-pane hidden" id="outreach-pane-drafts">
+                    <div class="outreach-toolbar">
+                        <button class="btn btn--primary" id="btn-send-selected-drafts">Send selected</button>
+                        <span class="outreach-hint" id="drafts-hint"></span>
+                    </div>
+                    <div id="outreach-drafts-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Sent log -->
+                <div class="outreach-pane hidden" id="outreach-pane-sent">
+                    <p class="outreach-hint">Every message that left the building — what was sent, to whom, and when.</p>
+                    <div id="outreach-sent-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Templates -->
+                <div class="outreach-pane hidden" id="outreach-pane-templates">
+                    <p class="outreach-hint">
+                        Save a draft that worked and reuse it. Placeholders are re-filled per lead:
+                        <code id="template-placeholder-help"></code>
+                    </p>
+                    <div id="outreach-templates-list" class="outreach-list"></div>
+                </div>
+
+                <!-- Opt-outs -->
+                <div class="outreach-pane hidden" id="outreach-pane-optout">
+                    <div class="optout-grid">
+                        <div class="optout-card">
+                            <h3>Scan a reply for opt-out</h3>
+                            <p class="outreach-hint">
+                                Paste a reply. Clear opt-out language suppresses the sender and cancels
+                                their queued messages. Ambiguous wording is flagged for you to decide.
+                            </p>
+                            <textarea class="config-input" id="reply-scan-text" rows="7" placeholder="Paste the full reply, including headers…"></textarea>
+                            <button class="btn btn--primary" id="btn-scan-reply" style="width:100%;margin-top:8px;">Scan reply</button>
+                            <div id="reply-scan-result" class="scan-result"></div>
+                        </div>
+                        <div class="optout-card">
+                            <h3>Do-not-contact list</h3>
+                            <div class="suppress-add">
+                                <input type="text" class="config-input" id="suppress-email" placeholder="email@company.com or a whole domain">
+                                <button class="btn btn--secondary" id="btn-add-suppression">Block</button>
+                            </div>
+                            <div id="suppression-list" class="outreach-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 5: Groq AI Copilot -->
+            <div class="tab-panel" id="panel-ai-assistant">
+                <div class="copilot-card">
+                    <div class="copilot-header">
+                        <div class="copilot-avatar">⚡</div>
+                        <div>
+                            <h3 id="copilot-title">AI Sales Copilot</h3>
+                            <p>Ask AI to query leads, summarize intent signals, or draft hyper-personalized outreach emails.</p>
+                        </div>
+                    </div>
+                    <div class="chat-messages" id="chat-messages">
+                        <div class="chat-msg assistant">
+                            <span id="copilot-greeting">Ask about your pipeline — I answer from the leads currently loaded for your active ICP.</span>
+                        </div>
+                    </div>
+                    <div class="chat-input-bar">
+                        <input type="text" class="chat-input" id="chat-input" placeholder="Ask e.g. 'Which leads have the strongest buying signals?' or 'Draft an outreach email for my top lead'...">
+                        <button class="btn btn--primary" id="btn-send-chat">Send</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ═══ Lead Detail Inspection Slide-Over Modal ═══ -->
+    <div class="drawer-overlay hidden" id="drawer-overlay">
+        <div class="drawer" id="drawer">
+            <button class="drawer__close" id="btn-close-drawer">&times;</button>
+            <div class="drawer__content" id="drawer-content"></div>
+        </div>
+    </div>
+
+    <!-- ═══ Settings Modal ═══ -->
+    <div class="modal-overlay hidden" id="settings-modal-overlay">
+        <div class="modal modal--settings" id="settings-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">⚡ LeadPulse AI Engine Configuration</h2>
+                <button class="modal__close" id="settings-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div class="config-section">
+                    <h3>⚡ AI Engine</h3>
+                    <div class="status-indicator" id="groq-status">Checking integration status…</div>
+                </div>
+
+                <div class="config-section">
+                    <h3>🔌 Integrations</h3>
+                    <p class="config-desc">
+                        API keys are configured on the server in <code>backend/.env</code> — never in the
+                        browser. Edit that file and restart the server to change them.
+                    </p>
+                    <div id="provider-status-list"></div>
+                </div>
+
+                <button class="btn btn--accent" id="btn-save-all-settings" style="width:100%;margin-top:12px;">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Target ICP Configuration Modal ═══ -->
+    <div class="modal-overlay hidden" id="icp-modal-overlay">
+        <div class="modal modal--icp" id="icp-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Who do you want to find?</h2>
+                <button class="modal__close" id="icp-modal-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <p class="icp-intro">Tell us your ideal customer in plain language. Discovery will search the web, LinkedIn, news, and jobs for matching companies.</p>
+
+                <div class="icp-presets icp-presets--saved">
+                    <label class="form-label" for="icp-saved-select">Saved profile</label>
+                    <div class="icp-presets__list" style="flex:1;display:flex;gap:8px;align-items:center;">
+                        <select class="config-input" id="icp-saved-select" style="flex:1;margin-bottom:0;">
+                            <option value="">+ Create new profile</option>
+                        </select>
+                        <button class="btn btn--secondary" id="btn-icp-delete" type="button" title="Delete the selected ICP">Delete</button>
+                    </div>
+                </div>
+
+                <div class="icp-presets">
+                    <span class="icp-presets__label">Or start from a template</span>
+                    <div class="icp-presets__list">
+                        <button class="icp-preset-btn" data-preset="saas" type="button">B2B SaaS CTOs</button>
+                        <button class="icp-preset-btn" data-preset="fintech" type="button">Fintech VPs</button>
+                        <button class="icp-preset-btn" data-preset="aiml" type="button">AI Startup Founders</button>
+                        <button class="icp-preset-btn" data-preset="health" type="button">Healthcare IT</button>
+                    </div>
+                </div>
+
+                <form id="icp-form" onsubmit="event.preventDefault();">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-name">Profile name <span class="required">*</span></label>
+                            <input type="text" class="config-input" id="icp-form-name" placeholder="e.g. Mid-market SaaS in the US" required>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-industries">Industry</label>
+                            <input type="text" class="config-input" id="icp-form-industries" placeholder="SaaS, Fintech, Healthcare…">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-geos">Location</label>
+                            <input type="text" class="config-input" id="icp-form-geos" placeholder="United States, India, UK…">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-size-range">Company size</label>
+                            <select class="config-input" id="icp-form-size-range">
+                                <option value="1-50">Startup (1–50)</option>
+                                <option value="50-200">SMB (50–200)</option>
+                                <option value="50-1000" selected>Mid-market (50–1,000)</option>
+                                <option value="200-5000">Growth (200–5,000)</option>
+                                <option value="1000-50000">Enterprise (1,000+)</option>
+                                <option value="1-100000">Any size</option>
+                            </select>
+                            <input type="hidden" id="icp-form-size-min" value="50">
+                            <input type="hidden" id="icp-form-size-max" value="1000">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-titles">Buyer titles</label>
+                            <input type="text" class="config-input" id="icp-form-titles" placeholder="CTO, VP Engineering, Founder…">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="icp-form-keywords">What are they buying / hiring for?</label>
+                            <input type="text" class="config-input" id="icp-form-keywords" placeholder="cloud cost, devops, AI, payments…">
+                        </div>
+                    </div>
+
+                    <input type="hidden" id="icp-form-desc" value="">
+                    <input type="hidden" id="icp-form-active" value="1">
+
+                    <div class="modal__actions" style="margin-top:20px;display:flex;gap:12px;">
+                        <button class="btn btn--primary" id="btn-save-icp" type="button" style="flex:2;">Save &amp; find leads</button>
+                        <button class="btn btn--secondary" id="btn-cancel-icp" type="button" style="flex:1;">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Manual Lead Entry Modal ═══ -->
+    <div class="modal-overlay hidden" id="manual-lead-overlay">
+        <div class="modal modal--icp" id="manual-lead-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Add a lead you found yourself</h2>
+                <button class="modal__close" id="manual-lead-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <p class="icp-intro">
+                    For prospects that came from outside the AI pipeline — a referral, a conference,
+                    a list you already had. It goes straight into your accepted leads.
+                </p>
+                <form id="manual-lead-form" onsubmit="event.preventDefault();">
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-company">Company <span class="required">*</span></label>
+                            <input type="text" class="config-input" id="ml-company" required placeholder="Acme Inc">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-website">Website</label>
+                            <input type="text" class="config-input" id="ml-website" placeholder="acme.com">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-contact">Contact name</label>
+                            <input type="text" class="config-input" id="ml-contact" placeholder="Jane Doe">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-title">Job title</label>
+                            <input type="text" class="config-input" id="ml-title" placeholder="VP Engineering">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-email">Email</label>
+                            <input type="email" class="config-input" id="ml-email" placeholder="jane@acme.com">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-linkedin">LinkedIn</label>
+                            <input type="text" class="config-input" id="ml-linkedin" placeholder="linkedin.com/in/…">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-industry">Industry</label>
+                            <input type="text" class="config-input" id="ml-industry" placeholder="SaaS">
+                        </div>
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-location">Location</label>
+                            <input type="text" class="config-input" id="ml-location" placeholder="London, UK">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group flex-1">
+                            <label class="form-label" for="ml-signal">Why are you contacting them?</label>
+                            <input type="text" class="config-input" id="ml-signal" placeholder="Met at SaaStr, asked about our pricing">
+                            <span class="form-hint">This becomes the trigger the AI personalises the message around.</span>
+                        </div>
+                    </div>
+                    <div class="modal__actions" style="margin-top:20px;display:flex;gap:12px;">
+                        <button class="btn btn--primary" id="btn-save-manual-lead" type="button" style="flex:2;">Add lead</button>
+                        <button class="btn btn--secondary" id="btn-cancel-manual-lead" type="button" style="flex:1;">Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Message Composer ═══ -->
+    <div class="modal-overlay hidden" id="composer-overlay">
+        <div class="modal modal--composer" id="composer-modal">
+            <div class="modal__header">
+                <h2 class="modal__title" id="composer-title">Draft message</h2>
+                <button class="modal__close" id="composer-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <div class="composer-meta" id="composer-meta"></div>
+
+                <div class="composer-actions">
+                    <button class="btn btn--primary" id="btn-composer-generate">
+                        <span id="composer-generate-label">Generate with AI</span>
+                    </button>
+                    <button class="btn btn--gemini" id="btn-composer-gemini" title="Build the prompt, open Gemini under your own Google login, paste the answer back">
+                        Open in Gemini
+                    </button>
+                    <select class="config-input composer-template-select" id="composer-template">
+                        <option value="">Apply a template…</option>
+                    </select>
+                </div>
+
+                <div id="composer-notice" class="composer-notice"></div>
+
+                <div class="form-group">
+                    <label class="form-label" for="composer-to">To</label>
+                    <input type="email" class="config-input" id="composer-to" placeholder="no email on this lead — add one to send">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="composer-subject">Subject</label>
+                    <input type="text" class="config-input" id="composer-subject" placeholder="Subject line">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="composer-body">Message</label>
+                    <textarea class="config-input composer-body" id="composer-body" rows="14" placeholder="Write, or generate a first draft above…"></textarea>
+                    <span class="form-hint" id="composer-wordcount"></span>
+                </div>
+
+                <div class="composer-send-row">
+                    <button class="btn btn--primary" id="btn-composer-send">Send now</button>
+                    <input type="datetime-local" class="config-input composer-when" id="composer-when">
+                    <button class="btn btn--secondary" id="btn-composer-schedule">Schedule</button>
+                    <button class="btn btn--secondary" id="btn-composer-save-template">Save as template</button>
+                </div>
+                <div class="composer-alt" id="composer-alt-links"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Gemini Handoff Modal — the keyless path ═══ -->
+    <div class="modal-overlay hidden" id="gemini-overlay">
+        <div class="modal modal--gemini" id="gemini-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Write it in Gemini</h2>
+                <button class="modal__close" id="gemini-close">&times;</button>
+            </div>
+            <div class="modal__body">
+                <ol class="gemini-steps">
+                    <li id="gemini-step-copy"><strong>Copying the prompt…</strong></li>
+                    <li>Paste it into Gemini (Ctrl+V / ⌘V) and press enter.</li>
+                    <li>Copy Gemini's answer and paste it in the box below.</li>
+                </ol>
+                <p class="outreach-hint">
+                    No API key is used here — the message is written by your own Gemini account.
+                    A server cannot use a browser login on your behalf, which is why this step is manual.
+                </p>
+
+                <div class="gemini-actions">
+                    <button class="btn btn--gemini" id="btn-gemini-open">Open Gemini &amp; copy prompt</button>
+                    <button class="btn btn--secondary" id="btn-gemini-copy">Copy prompt again</button>
+                </div>
+
+                <details class="gemini-prompt-details">
+                    <summary>See the prompt being sent</summary>
+                    <pre class="gemini-prompt" id="gemini-prompt-preview"></pre>
+                </details>
+
+                <div class="form-group" style="margin-top:14px;">
+                    <label class="form-label" for="gemini-paste">Paste Gemini's answer here</label>
+                    <textarea class="config-input composer-body" id="gemini-paste" rows="10" placeholder="Subject: …&#10;&#10;Hi …"></textarea>
+                </div>
+                <button class="btn btn--primary" id="btn-gemini-apply" style="width:100%;">Use this as my draft</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Discovery Progress Toast ═══ -->
+    <div class="discovery-toast hidden" id="discovery-toast">
+        <div class="discovery-toast__spinner"></div>
+        <div class="discovery-toast__text">
+            <strong>Running Multi-Source AI Pipeline...</strong>
+            <span id="discovery-status-text">Scanning web, LinkedIn, news &amp; jobs...</span>
+        </div>
+        <div class="discovery-toast__progress">
+            <div class="discovery-toast__bar" id="discovery-bar"></div>
+        </div>
+    </div>
+
+    <!-- Spreadsheet import -->
+    <div class="modal-overlay hidden" id="import-modal-overlay">
+        <div class="modal modal--icp" id="import-modal">
+            <div class="modal__header">
+                <h2 class="modal__title">Upload a company list</h2>
+                <button class="modal__close" id="import-modal-close">&times;</button>
+            </div>
+            <div class="modal__body">
+              <div id="import-form-section">
+                <p class="icp-intro">
+                    Upload an .xlsx, .xls or .csv of companies. Every row is looked up on the web
+                    for an email, phone, LinkedIn page and a named decision maker. Columns are
+                    detected automatically — one "Company" or "Website" column is all that is needed.
+                </p>
+
+                <div class="form-group">
+                    <label class="form-label" for="import-file">Spreadsheet</label>
+                    <input class="config-input" type="file" id="import-file" accept=".xlsx,.xls,.csv">
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Where should these leads go?</label>
+                    <label style="display:flex;gap:8px;align-items:center;margin-bottom:6px;cursor:pointer;">
+                        <input type="radio" name="import-target" value="new" checked>
+                        <span>Create a new ICP for this list</span>
+                    </label>
+                    <label style="display:flex;gap:8px;align-items:center;cursor:pointer;">
+                        <input type="radio" name="import-target" value="current">
+                        <span>Add to the current target ICP</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="import-fields">What do you want for each company?</label>
+                    <input class="config-input" type="text" id="import-fields"
+                           placeholder="contact name, job title, email, phone, linkedin">
+                    <div class="icp-intro" style="margin-top:4px;font-size:.78rem;">
+                        Comma separated. Anything the pages can support works — "founder name,
+                        pricing model, tech stack". Left blank, it looks for name, title, email,
+                        phone and LinkedIn.
+                    </div>
+                </div>
+
+                <div class="form-group" id="import-name-group">
+                    <label class="form-label" for="import-icp-name">New ICP name</label>
+                    <input class="config-input" type="text" id="import-icp-name" placeholder="Named after the file if left blank">
+                </div>
+
+                <div id="import-status" class="icp-intro" style="min-height:20px;"></div>
+
+                <div style="display:flex;gap:10px;margin-top:8px;">
+                    <button class="btn btn--primary" id="btn-start-import" type="button" style="flex:2;">Find contact details</button>
+                    <button class="btn btn--secondary" id="btn-cancel-import" type="button" style="flex:1;">Cancel</button>
+                </div>
+              </div>
+
+              <!-- Filled in once the import finishes: one row per company,
+                   saying what was found and what was not. -->
+              <div id="import-report" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- External Libraries & Scripts -->
+    <script src="js/config.js"></script>
+    <script src="js/data.js"></script>
+    <script src="js/animations.js"></script>
+    <script src="js/filters.js"></script>
+    <script src="js/views.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/modal.js"></script>
+    <script src="js/import.js"></script>
+    <script src="js/review.js"></script>
+    <script src="js/outreach.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>
