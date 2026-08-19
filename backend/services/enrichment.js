@@ -189,34 +189,100 @@ class EnrichmentService {
    */
   static async _fromPublicSite(domain) {
     const host = String(domain).replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
-    // Ordered by how often each carries a contact address. The legal pages are
-    // last but matter: a company with a form-only contact page frequently still
-    // prints a real address in its imprint or privacy policy.
-    const paths = [
-      '', '/contact', '/contact-us', '/about', '/about-us', '/company',
-      '/team', '/support', '/help', '/imprint', '/impressum', '/legal', '/privacy'
-    ];
     const out = {};
 
-    for (const path of paths) {
+    // The homepage first, because it names where everything else lives.
+    let discovered = [];
+    try {
+      const home = await this._fetchHtml(`https://${host}`);
+      if (home) {
+        mergePreferExisting(out, this._extractFromHtml(home.html, host));
+        discovered = this._discoverContactPages(home.html, host);
+      }
+    } catch (err) {
+      logger.debug(`Homepage ${host} soft-failed: ${err.message}`);
+    }
+
+    // Guessing paths only finds a contact page that happens to be called
+    // "/contact". MathWorks keeps theirs at /company/aboutus/contact_us.html,
+    // with every office phone number on it, and no amount of guessing reaches
+    // that — but the homepage links to it by name. Follow the site's own links
+    // first and fall back to the common paths for sites that link to none.
+    const fallback = [
+      '/contact', '/contact-us', '/about', '/about-us', '/company',
+      '/team', '/support', '/imprint', '/impressum', '/legal', '/privacy'
+    ].map(path => `https://${host}${path}`);
+
+    const targets = [...new Set([...discovered, ...fallback])].slice(0, config.ENRICHMENT_MAX_PAGES);
+
+    for (const url of targets) {
+      // Everything worth having is already in hand.
+      if (out.contact_email && out.contact_phone && out.contact_linkedin && out.company_description) break;
+
       try {
-        const page = await this._fetchHtml(`https://${host}${path}`);
+        const page = await this._fetchHtml(url);
         if (!page) continue;
-        const extracted = this._extractFromHtml(page.html, host);
-        mergePreferExisting(out, extracted);
-        // One solid homepage is enough for most fields; still try /contact for email.
-        if (path === '' && (out.company_description || out.contact_linkedin)) {
-          /* continue to contact paths for email/phone */
-        }
-        if (out.contact_email && out.contact_phone && out.contact_linkedin && out.company_description) {
-          break;
-        }
+        mergePreferExisting(out, this._extractFromHtml(page.html, host));
       } catch (err) {
-        logger.debug(`Public page ${host}${path} soft-failed: ${err.message}`);
+        logger.debug(`Public page ${url} soft-failed: ${err.message}`);
       }
     }
 
     return out;
+  }
+
+  /**
+   * Links on a homepage that lead to contact details, best first.
+   *
+   * Matched on both the href and the link text, because the two disagree often
+   * enough to matter: "Contact Us" frequently points at
+   * /company/aboutus/contact_us.html, and /kontakt is a contact page whose text
+   * says nothing an English pattern would match.
+   */
+  static _discoverContactPages(html, host) {
+    const $ = cheerio.load(html);
+    const scored = new Map();
+
+    // Weighted by how likely the page is to carry a phone number or an address.
+    const rules = [
+      [/contact|kontakt|contacto|reach-us|get-in-touch/i, 100],
+      [/impressum|imprint|legal-notice/i, 90],
+      [/team|leadership|our-people|management|founders/i, 70],
+      [/about|company|who-we-are|nosotros/i, 50],
+      [/support|help-?center|customer-service/i, 40],
+      [/locations?|offices?|worldwide/i, 60]
+    ];
+
+    $('a[href]').each((_, el) => {
+      const href = String($(el).attr('href') || '').trim();
+      if (!href || href.startsWith('#') || /^(mailto|tel|javascript):/i.test(href)) return;
+
+      let url;
+      try {
+        url = new URL(href, `https://${host}`);
+      } catch (e) {
+        return;
+      }
+
+      // Offsite links are somebody else's contact details.
+      const linkHost = url.hostname.replace(/^www\./, '');
+      if (linkHost !== host && !linkHost.endsWith(`.${host}`)) return;
+      if (/\.(pdf|jpe?g|png|gif|svg|zip|mp4|css|js)$/i.test(url.pathname)) return;
+
+      const haystack = `${url.pathname} ${$(el).text()}`;
+      let best = 0;
+      for (const [pattern, weight] of rules) {
+        if (pattern.test(haystack)) best = Math.max(best, weight);
+      }
+      if (best === 0) return;
+
+      const clean = `${url.origin}${url.pathname}`;
+      if (!scored.has(clean) || scored.get(clean) < best) scored.set(clean, best);
+    });
+
+    return [...scored.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([url]) => url);
   }
 
   static async _fetchHtml(url) {

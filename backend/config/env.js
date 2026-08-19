@@ -247,6 +247,11 @@ module.exports = {
   BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 15,
   BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 8,
 
+  // Pages fetched per company while enriching. The homepage plus the handful of
+  // links it offers to contact, team and legal pages; beyond that the yield
+  // falls off sharply and the time is better spent on the next company.
+  ENRICHMENT_MAX_PAGES: parseInt(process.env.ENRICHMENT_MAX_PAGES) || 6,
+
   // ── Spreadsheet import ───────────────────────────────────────────────────
   // Uploading a list of companies and looking up their contacts is the same
   // enrichment work discovery does, so it is bounded the same way: a row cap

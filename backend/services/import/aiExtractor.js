@@ -2,33 +2,37 @@ const cheerio = require('cheerio');
 const logger = require('../../utils/logger');
 const config = require('../../config/env');
 const GroqClient = require('../groqClient');
+const Search = require('../discovery/collectors/search');
 
 /**
- * Read scraped pages with a model and pull out whatever the user asked for.
+ * Read what has been gathered about a company and pull out what was asked for.
  *
- * Pattern matching finds an address only when it is written as one. A company
- * page routinely is not: "reach our founder Jane Doe at jane [at] acme.io",
- * a phone printed as "call us on nine-eight-double-seven", a leadership section
- * where the name and the title sit in separate elements. Those are exactly the
- * cases a reader has no trouble with and a regex cannot see, and they are the
- * difference between an imported row that can be contacted and one that cannot.
+ * Two sources, tried in that order:
  *
- * The requested fields are the user's, not a fixed list: whatever they type on
+ *   the company's own pages — where most small companies publish everything;
+ *   web search results      — where most large ones effectively do.
+ *
+ * Pattern matching only finds a detail written as one, and a page routinely
+ * does not oblige: a founder named in prose, "jane [at] acme.io", a name and a
+ * title sitting in separate elements. Those are the cases a reader has no
+ * trouble with and a regex cannot see.
+ *
+ * The requested fields are the user's, not a fixed list — whatever they type on
  * the upload form becomes the schema the model fills in.
  */
 
 // Fields the pipeline already has columns for. Anything else the user asks for
 // is kept alongside as free-form extracted data.
 const KNOWN_FIELDS = {
-  'contact_email': ['email', 'e-mail', 'email address', 'contact email'],
-  'contact_phone': ['phone', 'telephone', 'mobile', 'contact number', 'phone number'],
-  'contact_name': ['name', 'contact name', 'owner', 'owner name', 'founder', 'ceo', 'decision maker', 'contact person'],
-  'contact_title': ['title', 'job title', 'role', 'designation', 'position'],
-  'contact_linkedin': ['linkedin', 'linkedin url', 'linkedin profile'],
-  'company_location': ['location', 'address', 'city', 'headquarters', 'hq'],
-  'company_size': ['size', 'employees', 'employee count', 'headcount', 'team size'],
-  'company_industry': ['industry', 'sector', 'vertical', 'niche'],
-  'company_description': ['description', 'what they do', 'about', 'summary', 'overview']
+  contact_email: ['email', 'e-mail', 'email address', 'contact email'],
+  contact_phone: ['phone', 'telephone', 'mobile', 'contact number', 'phone number'],
+  contact_name: ['name', 'contact name', 'owner', 'owner name', 'founder', 'ceo', 'decision maker', 'contact person'],
+  contact_title: ['title', 'job title', 'role', 'designation', 'position'],
+  contact_linkedin: ['linkedin', 'linkedin url', 'linkedin profile'],
+  company_location: ['location', 'address', 'city', 'headquarters', 'hq'],
+  company_size: ['size', 'employees', 'employee count', 'headcount', 'team size'],
+  company_industry: ['industry', 'sector', 'vertical', 'niche'],
+  company_description: ['description', 'what they do', 'about', 'summary', 'overview']
 };
 
 /** Map a user's wording onto a lead column, or null when it is a custom field. */
@@ -54,15 +58,16 @@ function parseRequestedFields(input) {
 }
 
 /**
- * Condense pages into something worth sending to a model.
+ * Condense a page into something worth sending to a model.
  *
- * Whole pages are mostly navigation and boilerplate, and the token budget is
- * the binding constraint on a free tier — so scripts and chrome are stripped,
- * and the sections that actually carry contact details are kept.
+ * Whole pages are mostly navigation and boilerplate, and tokens per minute are
+ * the binding constraint on a free tier — so chrome is stripped and the links
+ * that carry contact details are lifted to the front, where they survive the
+ * truncation.
  */
 function condense(html, maxChars = 4000) {
   const $ = cheerio.load(html);
-  $('script, style, noscript, svg, iframe, nav, header > nav').remove();
+  $('script, style, noscript, svg, iframe').remove();
 
   const parts = [];
 
@@ -75,12 +80,10 @@ function condense(html, maxChars = 4000) {
 
   $('a[href*="linkedin.com"]').each((_, el) => {
     const href = $(el).attr('href') || '';
-    if (href) parts.push(`linkedin: ${href}`);
+    if (href) parts.push('linkedin: ' + href);
   });
 
-  const body = $('body').text().replace(/\s+/g, ' ').trim();
-  parts.push(body);
-
+  parts.push($('body').text().replace(/\s+/g, ' ').trim());
   return parts.join('\n').slice(0, maxChars);
 }
 
@@ -90,6 +93,8 @@ class AiExtractor {
   }
 
   /**
+   * Read the company's own pages.
+   *
    * @param {Object} opts
    * @param {string} opts.companyName
    * @param {string} opts.website
@@ -98,34 +103,120 @@ class AiExtractor {
    * @param {Array<string>} opts.missing  which of those are still unknown
    * @returns {Promise<Object|null>} field -> value, only for what it found
    */
-  static async extract({ companyName, website, pages, fields, missing }) {
+  static async extract({ companyName, website, location, pages, fields, missing }) {
     if (!this.available || !pages?.length) return null;
 
     const wanted = (missing?.length ? missing : fields) || [];
     if (wanted.length === 0) return null;
 
     const corpus = pages
-      .map(p => `--- ${p.url} ---\n${condense(p.html, config.AI_EXTRACT_CHARS_PER_PAGE)}`)
+      .map(p => '--- ' + p.url + ' ---\n' + condense(p.html, config.AI_EXTRACT_CHARS_PER_PAGE))
       .join('\n\n')
       .slice(0, config.AI_EXTRACT_MAX_CHARS);
 
     if (corpus.trim().length < 100) return null;
 
-    const system =
-      `You read a company's own web pages and report the details asked for.\n\n` +
-      `Return ONLY JSON: {"fields":{"<requested field>":"<value>"}}\n\n` +
-      `Rules:\n` +
-      `- Include a field only when the pages actually support it. Omit it otherwise; never guess.\n` +
-      `- Report an address that is written awkwardly ("jane [at] acme dot io") in its normal form.\n` +
-      `- The contact must belong to ${companyName}. Pages link to customers, partners and agencies; their details are not this company's.\n` +
-      `- Prefer a named decision maker (founder, owner, CEO, head of…) over a generic inbox when the pages name one.\n` +
-      `- Values are plain strings, no markdown, no commentary.`;
+    const system = [
+      "You read a company's own web pages and report the details asked for.",
+      '',
+      'Return ONLY JSON: {"fields":{"<requested field>":"<value>"}}',
+      '',
+      'Rules:',
+      '- Include a field only when the pages actually support it. Omit it otherwise; never guess.',
+      '- Report an address written awkwardly ("jane [at] acme dot io") in its normal form.',
+      '- The contact must belong to ' + companyName + '. Pages link to customers, partners and agencies; their details are not this company\'s.',
+      '- Prefer a named decision maker (founder, owner, CEO, head of…) over a generic inbox when the pages name one.',
+      location
+        ? '- This row is about the ' + location + ' office. Where the pages list several offices, report that one — a head-office number in another country is the wrong answer here.'
+        : '- Report the main office when the pages list several.',
+      '- Values are plain strings, no markdown, no commentary.'
+    ].join('\n');
 
-    const user =
-      `Company: ${companyName}${website ? ` (${website})` : ''}\n` +
-      `Fields wanted: ${wanted.join(', ')}\n\n` +
-      `Pages:\n${corpus}`;
+    const user = [
+      'Company: ' + companyName + (website ? ' (' + website + ')' : ''),
+      'Fields wanted: ' + wanted.join(', '),
+      '',
+      'Pages:',
+      corpus
+    ].join('\n');
 
+    return this._ask(system, user, companyName, 'pages');
+  }
+
+  /**
+   * Read web search results instead.
+   *
+   * A company's site is not always where its contact details are, and for a
+   * large one it usually is not: MathWorks publishes its India number on a deep
+   * worldwide-offices page that no path guess reaches, and plenty of firms are
+   * easiest to reach through a directory listing or a regional subsidiary page.
+   *
+   * Searching for the company and reading what comes back is what a person does
+   * when the website does not answer — and it is the step this pipeline was
+   * missing against a general-purpose assistant asked the same question.
+   */
+  static async extractFromSearch({ companyName, website, location, fields, missing }) {
+    if (!this.available || !companyName) return null;
+
+    const wanted = (missing?.length ? missing : fields) || [];
+    if (wanted.length === 0) return null;
+
+    // Ask the way a person would, and name the place: a sheet of regional
+    // subsidiaries otherwise returns the parent company on every query.
+    const where = location
+      ? ' ' + String(location).split(',').slice(-2).join(' ').trim()
+      : '';
+
+    const results = [];
+    const seen = new Set();
+    for (const q of ['"' + companyName + '"' + where + ' contact phone email address',
+                     '"' + companyName + '"' + where + ' office contact number']) {
+      if (results.length >= 8) break;
+      try {
+        for (const r of await Search.run(q, 8)) {
+          if (seen.has(r.url)) continue;
+          seen.add(r.url);
+          results.push(r);
+        }
+      } catch (err) {
+        logger.debug('Contact search failed for ' + companyName + ': ' + err.message);
+      }
+    }
+
+    if (results.length === 0) return null;
+
+    const corpus = results
+      .slice(0, 10)
+      .map(r => [r.title, r.url, r.snippet].filter(Boolean).join('\n'))
+      .join('\n\n')
+      .slice(0, config.AI_EXTRACT_MAX_CHARS);
+
+    const system = [
+      'You read web search results and report contact details for one company.',
+      '',
+      'Return ONLY JSON: {"fields":{"<requested field>":"<value>"}}',
+      '',
+      'Rules:',
+      '- The details must belong to ' + companyName + ' itself. Results mention competitors, directories and unrelated firms; theirs do not count.',
+      '- Include a field only when a result actually states it. Omit it otherwise; never guess or construct a number.',
+      '- Prefer the office in ' + (location || 'the company\'s main location') + ' when results give several.',
+      '- Values are plain strings, no markdown, no commentary.'
+    ].join('\n');
+
+    const user = [
+      'Company: ' + companyName + (website ? ' (' + website + ')' : ''),
+      'Location: ' + (location || 'unknown'),
+      'Fields wanted: ' + wanted.join(', '),
+      '',
+      'Search results:',
+      corpus
+    ].join('\n');
+
+    return this._ask(system, user, companyName, 'search');
+  }
+
+  /** One model call, with the answer cleaned up. */
+  static async _ask(system, user, companyName, kind) {
     try {
       const parsed = await GroqClient.chatJson({
         system,
@@ -136,22 +227,27 @@ class AiExtractor {
         expectedOutputTokens: 300,
         temperature: 0
       });
-
-      const found = parsed?.fields || parsed || {};
-      const out = {};
-      for (const [key, value] of Object.entries(found)) {
-        if (value == null) continue;
-        const text = String(value).trim();
-        // Models sometimes answer the question rather than leaving it out.
-        if (!text || /^(n\/?a|none|not (found|available|listed|provided)|unknown|null)$/i.test(text)) continue;
-        out[key] = text.slice(0, 400);
-      }
-
-      return Object.keys(out).length > 0 ? out : null;
+      return this._clean(parsed?.fields || parsed || {});
     } catch (err) {
-      logger.debug(`AI extraction failed for ${companyName}: ${err.message}`);
+      logger.debug('AI extraction (' + kind + ') failed for ' + companyName + ': ' + err.message);
       return null;
     }
+  }
+
+  /**
+   * Drop the "not found" answers a model gives instead of omitting the field,
+   * which would otherwise be stored as though it were a real value.
+   */
+  static _clean(found) {
+    const out = {};
+    for (const [key, value] of Object.entries(found)) {
+      if (value == null) continue;
+      const text = String(value).trim();
+      if (!text) continue;
+      if (/^(n\/?a|none|not (found|available|listed|provided|specified)|unknown|null|-|—)$/i.test(text)) continue;
+      out[key] = text.slice(0, 400);
+    }
+    return Object.keys(out).length > 0 ? out : null;
   }
 }
 
