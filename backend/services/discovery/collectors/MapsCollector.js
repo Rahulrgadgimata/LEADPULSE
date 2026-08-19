@@ -1,6 +1,7 @@
 const logger = require('../../../utils/logger');
 const config = require('../../../config/env');
 const searchApi = require('../../searchApiClient');
+const firecrawl = require('../../firecrawlClient');
 const geoMatch = require('../geoMatch');
 const runBudget = require('../runBudget');
 const { isNonProspect, isMegaCorp } = require('./domainFilter');
@@ -23,8 +24,12 @@ const { isNonProspect, isMegaCorp } = require('./domainFilter');
  */
 class MapsCollector {
   static async search(icp, options = {}) {
-    if (!searchApi.available) {
-      logger.debug('MapsCollector skipped: SEARCHAPI_KEY not configured.');
+    // Two independent routes to the same data, on separate credit pools:
+    // SearchAPI returns structured places and is preferred, while Firecrawl
+    // renders the Maps page and the listings are parsed out of it. Having both
+    // means one being exhausted does not take Maps out of the run.
+    if (!searchApi.available && !firecrawl.available) {
+      logger.debug('MapsCollector skipped: neither SEARCHAPI_KEY nor FIRECRAWL_API_KEY is configured.');
       return [];
     }
 
@@ -35,7 +40,11 @@ class MapsCollector {
       return [];
     }
 
-    logger.info(`MapsCollector: ${queries.length} Maps queries (credit budget ${searchApi.budgetLeft()} left this run)`);
+    logger.info(
+      `MapsCollector: ${queries.length} Maps queries ` +
+      `(SearchAPI budget ${searchApi.available ? searchApi.budgetLeft() : 0} left this run` +
+      `${firecrawl.available ? ', Firecrawl rendering available as fallback' : ''})`
+    );
 
     const byKey = new Map();
     let queriesRun = 0;
@@ -45,10 +54,18 @@ class MapsCollector {
         logger.info(`MapsCollector stopped after ${queriesRun} queries: collection budget reached.`);
         break;
       }
-      if (searchApi.budgetLeft() <= 0) break;
+      const canSearchApi = searchApi.available && searchApi.budgetLeft() > 0;
+      if (!canSearchApi && !firecrawl.available) break;
 
       queriesRun++;
-      const places = await searchApi.maps(term);
+      // Structured data first; rendering the page is the fallback.
+      let places = canSearchApi ? await searchApi.maps(term) : [];
+      if (places.length === 0 && firecrawl.available) {
+        places = await firecrawl.maps(term);
+        if (places.length > 0) {
+          logger.debug(`Maps "${term}" served by Firecrawl rendering (${places.length} places).`);
+        }
+      }
 
       for (const place of places) {
         const lead = this._toLead(place, term, location, icp);
@@ -147,7 +164,16 @@ class MapsCollector {
     // Maps returns the whole neighbourhood for a broad term, so the ICP's
     // geography still decides — but here the answer is normally "yes", because
     // the query named the city.
-    const locationText = place.address || place.city || location || '';
+    //
+    // The rendered-page route gives a street address with no locality
+    // ("8900 Shoal Creek Blvd #127"), which the geography check reads as "not
+    // in the target country" and drops — every result, on a search that had
+    // named the city explicitly. Where the address does not already say where
+    // it is, the searched location is appended, which is exactly what it means.
+    let locationText = place.address || place.city || location || '';
+    if (location && locationText && !this._mentionsPlace(locationText, location)) {
+      locationText = `${locationText}, ${location}`;
+    }
     const geographies = this._parseList(icp.geographies);
     if (config.LEAD_GEO_STRICT && geographies.length > 0) {
       if (geoMatch.locationMatchesGeographies(locationText, geographies) === false) return null;
@@ -186,6 +212,16 @@ class MapsCollector {
         relevance_score: 0.55
       }
     };
+  }
+
+  /** Whether an address already names the city or country we searched. */
+  static _mentionsPlace(address, location) {
+    const haystack = address.toLowerCase();
+    return String(location)
+      .split(',')
+      .map(part => part.trim().toLowerCase())
+      .filter(part => part.length > 2)
+      .some(part => haystack.includes(part));
   }
 
   static _parseList(value) {

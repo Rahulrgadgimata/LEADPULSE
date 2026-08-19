@@ -7,6 +7,7 @@ const config = require('../../config/env');
 const { query } = require('../../config/database');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 const runBudget = require('../discovery/runBudget');
+const MapsLookup = require('./mapsLookup');
 
 /**
  * Turn an uploaded spreadsheet of companies into scored leads with contacts.
@@ -57,8 +58,10 @@ class ImportService {
         created: 0, duplicates: 0, enriched: 0,
         withEmail: 0, withPhone: 0, withBuyer: 0,
         complete: 0, partial: 0, nothing: 0,
-        failed: 0, skipped: 0
+        viaMaps: 0, failed: 0, skipped: 0
       };
+      // Shared across the concurrent workers, so the allowance is per import.
+      let mapsLookupsLeft = config.IMPORT_MAPS_LOOKUPS;
       const report = [];
       const total = rows.length;
       let completed = 0;
@@ -125,6 +128,34 @@ class ImportService {
             stats.enriched++;
           } else {
             entry.note = 'Ran out of time before this row could be researched.';
+          }
+
+          // Websites seldom publish a phone number; Maps almost always has one.
+          // Only rows still missing it spend a credit, and only while the
+          // per-import allowance lasts.
+          const beforeMaps = query(
+            'SELECT company_name, company_website, company_location, contact_phone FROM leads WHERE id = ?',
+            [lead.id]
+          ).rows[0] || {};
+
+          if (!beforeMaps.contact_phone && mapsLookupsLeft > 0 && MapsLookup.available && !runBudget.expired()) {
+            mapsLookupsLeft--;
+            try {
+              const found = await MapsLookup.find(beforeMaps);
+              if (found?.phone) {
+                query(
+                  `UPDATE leads SET contact_phone = ?,
+                     company_location = COALESCE(NULLIF(company_location, ''), ?),
+                     updated_at = ? WHERE id = ?`,
+                  [found.phone, found.address || null, new Date().toISOString(), lead.id]
+                );
+                entry.viaMaps = true;
+                stats.viaMaps++;
+                logger.info(`Maps supplied a phone for ${beforeMaps.company_name} (matched on ${found.confidence}).`);
+              }
+            } catch (mapsErr) {
+              logger.debug(`Maps lookup failed for ${beforeMaps.company_name}: ${mapsErr.message}`);
+            }
           }
 
           await ScoringService.compute(lead.id);
@@ -214,6 +245,7 @@ class ImportService {
     parts.push(`${stats.withEmail} with an email`);
     parts.push(`${stats.withPhone} with a phone`);
     parts.push(`${stats.withBuyer} with a named contact`);
+    if (stats.viaMaps) parts.push(`${stats.viaMaps} phone number(s) from Google Maps`);
     if (stats.nothing) parts.push(`${stats.nothing} with no contact found`);
     if (stats.failed) parts.push(`${stats.failed} failed`);
     if (stats.skipped) parts.push(`${stats.skipped} skipped`);

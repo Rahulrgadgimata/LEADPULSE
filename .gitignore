@@ -52,3 +52,7 @@ backend/scrapling/**/__pycache__/
 # Reference clone of the crawl4ai toolkit — its own repository, not part of
 # this project's source. Kept locally for the leadfinder prototype it ships.
 crawl4ai/
+
+# Zyte scraping skills installed via "npx skills add zytedata/skills".
+# Agent tooling for authoring Scrapy spiders, not part of this app.
+.agents/

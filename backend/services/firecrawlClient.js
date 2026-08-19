@@ -123,6 +123,31 @@ class FirecrawlClient {
   }
 
   /**
+   * Google Maps by rendering the search page.
+   *
+   * A second, independent route to Maps. SearchAPI returns cleaner structured
+   * data and is tried first, but its credits are few; this runs on Firecrawl's
+   * separate pool, so the two together roughly double how much Maps a month can
+   * carry, and either can cover the other being exhausted.
+   *
+   * Rendering is required — the Maps page ships no results in its HTML and
+   * fetches them afterwards, which is why plain HTTP and TLS impersonation both
+   * come back empty. (Firecrawl cannot substitute for Google *web* search the
+   * same way: that URL answers with a reCAPTCHA page. Use search() for it.)
+   *
+   * @returns {Promise<Array>} places in the same shape SearchApiClient.maps returns
+   */
+  static async maps(query) {
+    if (!this.available) return [];
+
+    const url = `https://www.google.com/maps/search/${encodeURIComponent(query)}?hl=en`;
+    const page = await this.scrape(url, { formats: ['markdown'], waitFor: 5000 });
+    if (!page?.markdown) return [];
+
+    return parseMapsMarkdown(page.markdown);
+  }
+
+  /**
    * Credit exhaustion and a bad key both mean "stop calling this"; a timeout
    * on one page does not.
    */
@@ -137,6 +162,59 @@ class FirecrawlClient {
       );
     }
   }
+}
+
+/**
+ * Pull business records out of a rendered Maps page.
+ *
+ * Each result begins with a link to its /maps/place/ entry, and the lines that
+ * follow carry the rating, the "type··address" pair, an hours line ending in
+ * the phone number, and a Website link. Splitting on the place links keeps one
+ * business per block, so a missing field never bleeds into the next record.
+ */
+function parseMapsMarkdown(markdown) {
+  const blocks = String(markdown).split(/\[(?=[^\]]*\]\(https:\/\/www\.google\.com\/maps\/place\/)/);
+  const places = [];
+  const seen = new Set();
+
+  for (const block of blocks) {
+    const nameMatch = /^([^\]]{2,80})\]\(https:\/\/www\.google\.com\/maps\/place\//.exec(block);
+    if (!nameMatch) continue;
+
+    const title = nameMatch[1].replace(/\\/g, '').trim();
+    if (!title || seen.has(title)) continue;
+
+    const website = (/Website\]\((https?:\/\/[^)\s]+)\)/.exec(block) || [])[1] || '';
+    // Skip Google's own links so a missing website is not read as a real one.
+    if (/google\.com|gstatic\.com/i.test(website)) continue;
+
+    const phone = (/\u00b7(\+?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})\s*$/m.exec(block) ||
+                   /(\(\d{3}\)\s?\d{3}-\d{4})/.exec(block) ||
+                   /(\+\d[\d ]{7,15}\d)/.exec(block) || [])[1] || '';
+
+    // "Software company··8900 Shoal Creek Blvd #127"
+    const typeAddress = /^([^\u00b7\u2022\u2219\u22c5\u30fb\uff65\n]{3,60})[\u00b7\u2022\u2219\u22c5\u30fb\uff65]+([^\n]{5,120})$/m.exec(block);
+    const rating = (/^(\d(?:\.\d)?)$/m.exec(block) || [])[1];
+    const reviews = (/^\((\d[\d,]*)\)$/m.exec(block) || [])[1];
+
+    seen.add(title);
+    places.push({
+      title,
+      address: typeAddress ? typeAddress[2].replace(/^[^\p{L}\p{N}]+/u, '').trim() : '',
+      city: '',
+      phone: phone.trim(),
+      website,
+      domain: website ? website.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0] : '',
+      rating: rating ? Number(rating) : undefined,
+      reviews: reviews ? Number(reviews.replace(/,/g, '')) : undefined,
+      type: typeAddress ? typeAddress[1].trim() : '',
+      types: [],
+      placeId: '',
+      coordinates: null
+    });
+  }
+
+  return places;
 }
 
 module.exports = FirecrawlClient;

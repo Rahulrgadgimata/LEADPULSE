@@ -244,6 +244,11 @@ module.exports = {
   IMPORT_MAX_ROWS: parseInt(process.env.IMPORT_MAX_ROWS) || 200,
   IMPORT_MAX_FILE_MB: parseInt(process.env.IMPORT_MAX_FILE_MB) || 5,
   IMPORT_RUN_BUDGET_MS: parseInt(process.env.IMPORT_RUN_BUDGET_MS) || 900000,
+  // Rows in one import that may be looked up on Google Maps for a phone number.
+  // Website scraping rarely yields a phone; Maps has one for almost every
+  // trading business. Each lookup spends a credit, so only rows still missing a
+  // phone after normal enrichment use one, up to this many.
+  IMPORT_MAPS_LOOKUPS: parseInt(process.env.IMPORT_MAPS_LOOKUPS) || 20,
 
   // A freshly saved ICP is protected for this long: it cannot be deleted
   // without an explicit force, and it wins every "which ICP is active" fallback

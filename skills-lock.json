@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "skills": {
+    "scrape": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape/SKILL.md",
+      "computedHash": "c4ee76d33f95182a85909f328e361802181257e2580292fb2db5a05d6d8330d6"
+    },
+    "scrape-add-page-object": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-add-page-object/SKILL.md",
+      "computedHash": "5f2d44635a203ed5d296ec7608f3b24d2e488de89b0a17f8e55e5cbb12cb2f9f"
+    },
+    "scrape-analyze-page": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-analyze-page/SKILL.md",
+      "computedHash": "0bf13926d5f2b98e3a8514e1af1836778a6a83d6ef5433cadc3a82d57040c0eb"
+    },
+    "scrape-codegen": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-codegen/SKILL.md",
+      "computedHash": "007e3528ff1d3d3a40fd1be99ebe1bd4ab7b0a0e4d36b60b8727143613af8f7c"
+    },
+    "scrape-codegen-analyze": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-codegen-analyze/SKILL.md",
+      "computedHash": "7c9084c85d34374e66ec877893558885a6fa594befe0246649ac768b029f0ee2"
+    },
+    "scrape-codegen-generate": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-codegen-generate/SKILL.md",
+      "computedHash": "df8ff484dc25fb3031f2baba5964906f86960f19df96be52304ec978826c35f4"
+    },
+    "scrape-create-spider": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-create-spider/SKILL.md",
+      "computedHash": "101dd1970de76a6e1a96ac7b8d4480314e997ef55595d6035d851c7259223c57"
+    },
+    "scrape-define": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-define/SKILL.md",
+      "computedHash": "9aac74f7eb61b6ea588bd6971d0b8f46fdc0199e8e1af13f1a20b5ac7c115df5"
+    },
+    "scrape-ensure-project": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-ensure-project/SKILL.md",
+      "computedHash": "ef89b7eaf179c0b1a77f278095d73abf061067d355e9c83c34ee983699657b57"
+    },
+    "scrape-explore-site": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-explore-site/SKILL.md",
+      "computedHash": "f3146e3853bc03b34eeec3ae5d718bc13f178d6aac721c517bc5d528a7581a23"
+    },
+    "scrape-review-schema": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-review-schema/SKILL.md",
+      "computedHash": "b5d3adbab6eedc2bc25e4eb54adee938b08261633dee8bdbfaedaa356545be16"
+    },
+    "scrape-scrapy-cloud": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-scrapy-cloud/SKILL.md",
+      "computedHash": "3b6c49b915f480587ef2c44fc5669031c8ec5bb5be18c36adb4a52dc66ec2e2f"
+    },
+    "scrape-spec": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-spec/SKILL.md",
+      "computedHash": "6b94d694fe3ebec3e058c379b7e7f1806cefc7832765da3c589d48546f583bdf"
+    },
+    "scrape-zyte-api-stats": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-zyte-api-stats/SKILL.md",
+      "computedHash": "aa726df711e247a89ba9c1678bd8b41a82ce10646a6a05d5c5e517a5b35bcf65"
+    },
+    "scrape-zyte-login": {
+      "source": "zytedata/skills",
+      "sourceType": "github",
+      "skillPath": "skills/scrape-zyte-login/SKILL.md",
+      "computedHash": "35289fe061f5bb33e164424c8777aff1fbf973df16efc6f42c0f01d883b85277"
+    }
+  }
+}

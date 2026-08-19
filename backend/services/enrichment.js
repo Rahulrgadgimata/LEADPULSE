@@ -342,8 +342,13 @@ class EnrichmentService {
     // Visible email patterns in contact copy.
     if (!out.contact_email) {
       const text = $('body').text().replace(/\s+/g, ' ').slice(0, 8000);
-      const match = text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
-      if (match && isUsefulEmail(match[0], host)) out.contact_email = match[0];
+      // Every candidate, not just the first. A page that prints a sample
+      // address ("you@example.com") before its real one used to end the
+      // search on the sample and report no email at all.
+      for (const candidate of text.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi) || []) {
+        const email = trimGluedTail(candidate);
+        if (isUsefulEmail(email, host)) { out.contact_email = email; break; }
+      }
     }
 
     return out;
@@ -439,6 +444,18 @@ function mergePreferExisting(target, source) {
     if (v === null || v === undefined || v === '') continue;
     if (!target[k]) target[k] = v;
   }
+}
+
+/**
+ * Strip a word that stripped HTML glued onto the end of an address.
+ *
+ * `<a>support@ghost.org</a>To contact us` flattens to "support@ghost.orgTo",
+ * which the address pattern happily swallows whole — one import stored exactly
+ * that as the company's email. A capital letter directly after the TLD is never
+ * part of it, so the address ends there.
+ */
+function trimGluedTail(email) {
+  return String(email).replace(/^([^@]+@[^@]*?\.[a-z]{2,24})(?=[A-Z])[\s\S]*$/, '$1');
 }
 
 function isUsefulEmail(email, host) {
