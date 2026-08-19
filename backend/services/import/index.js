@@ -9,6 +9,7 @@ const { mapWithConcurrency } = require('../../utils/concurrency');
 const runBudget = require('../discovery/runBudget');
 const MapsLookup = require('./mapsLookup');
 const { AiExtractor, toKnownField } = require('./aiExtractor');
+const SiteCrawler = require('./siteCrawler');
 
 // Enough to tell "this number is for another country" for the places these
 // sheets actually name. Unlisted countries simply never trigger the check.
@@ -402,19 +403,21 @@ class ImportService {
    * a JavaScript-only or WAF-fronted site still yields something.
    */
   static async _fetchPages(domain) {
-    const host = String(domain).replace(/^https?:\/\//i, '').replace(/^www\./i, '').split('/')[0];
-    const pages = [];
+    // A real crawl rather than four guessed paths. Contact details are spread
+    // across a site — a switchboard in one page's footer, the leadership team
+    // on another, the registered address only in an imprint — and the page that
+    // has them is often not called anything predictable.
+    const pages = await SiteCrawler.crawl(
+      domain,
+      url => EnrichmentService._fetchHtml(url)
+    );
 
-    for (const path of ['', '/contact', '/about', '/team']) {
-      if (runBudget.expired() || pages.length >= 3) break;
-      try {
-        const page = await EnrichmentService._fetchHtml(`https://${host}${path}`);
-        if (page?.html) pages.push({ url: `${host}${path}`, html: page.html });
-      } catch (err) {
-        // A site without /team is the normal case, not a failure to report.
-      }
-    }
-    return pages;
+    // Crawl widely, read narrowly: fetching is cheap next to the token budget,
+    // so only the most promising pages are actually sent to the model.
+    return pages
+      .sort((a, b) => b.score - a.score)
+      .slice(0, config.CRAWL_PAGES_TO_READ)
+      .map(p => ({ url: p.url, html: p.html }));
   }
 
   /**

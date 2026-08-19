@@ -116,6 +116,14 @@ const overrides = {
   // A spreadsheet import enriches every row, so it is capped like a run.
   IMPORT_MAX_ROWS: '150',
   IMPORT_MAX_FILE_MB: '5',
+
+  // Crawling is per row, so its budget multiplies by the sheet length. Ten
+  // pages still reaches the contact, offices and imprint pages on the sites
+  // measured here, and keeps a row to roughly half a minute — twenty would
+  // spend a fifteen-minute import on its first thirty companies.
+  CRAWL_MAX_PAGES: '10',
+  CRAWL_PAGES_TO_READ: '5',
+  CRAWL_MAX_DEPTH: '2',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying

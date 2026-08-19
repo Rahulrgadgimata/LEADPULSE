@@ -247,6 +247,18 @@ module.exports = {
   BUYER_TARGET_LEADS: parseInt(process.env.BUYER_TARGET_LEADS) || 15,
   BUYER_MAX_QUERIES: parseInt(process.env.BUYER_MAX_QUERIES) || 8,
 
+  // ── Site crawling ────────────────────────────────────────────────────────
+  // How far to walk a company's own site when an import asks for its details.
+  // A site is mostly product and marketing pages, so the crawl follows the
+  // most promising links first and stops at a budget rather than trying to be
+  // exhaustive — twenty pages reaches the contact, offices, team and imprint
+  // pages on every site tried, and spending more buys almost nothing.
+  CRAWL_MAX_PAGES: parseInt(process.env.CRAWL_MAX_PAGES) || 20,
+  CRAWL_MAX_DEPTH: parseInt(process.env.CRAWL_MAX_DEPTH) || 2,
+  // Pages whose text is actually sent to the model. The crawl is cheap; tokens
+  // are not, so only the best-scoring pages are read.
+  CRAWL_PAGES_TO_READ: parseInt(process.env.CRAWL_PAGES_TO_READ) || 8,
+
   // Pages fetched per company while enriching. The homepage plus the handful of
   // links it offers to contact, team and legal pages; beyond that the yield
   // falls off sharply and the time is better spent on the next company.
