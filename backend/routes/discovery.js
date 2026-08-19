@@ -65,8 +65,8 @@ router.get('/jobs', async (req, res) => {
   try {
     // Reconcile first: a run killed by a restart leaves status='running' in the
     // table, which would otherwise be listed as if it were still working.
-    DiscoveryService.sweepStalledJobs();
-    const jobs = query('SELECT * FROM discovery_jobs ORDER BY started_at DESC LIMIT 50');
+    await DiscoveryService.sweepStalledJobs();
+    const jobs = await query('SELECT * FROM discovery_jobs ORDER BY started_at DESC LIMIT 50');
     res.json(jobs.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

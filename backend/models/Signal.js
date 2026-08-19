@@ -23,17 +23,17 @@ class Signal {
       data.detected_at || now,
       now,
     ];
-    query(sql, params);
+    await query(sql, params);
     return this.findById(id);
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM signals WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM signals WHERE id = ?', [id]);
     return result.rows[0];
   }
 
   static async listByLead(leadId) {
-    const result = query('SELECT * FROM signals WHERE lead_id = ? ORDER BY detected_at DESC', [leadId]);
+    const result = await query('SELECT * FROM signals WHERE lead_id = ? ORDER BY detected_at DESC', [leadId]);
     return result.rows;
   }
 
@@ -51,7 +51,7 @@ class Signal {
     }
     params.push(limit);
 
-    const result = query(
+    const result = await query(
       `SELECT s.id, s.signal_type, s.source, s.source_url, s.title,
               s.relevance_score, s.detected_at,
               l.id AS lead_id, l.company_name, l.company_website,

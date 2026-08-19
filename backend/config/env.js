@@ -22,8 +22,19 @@ module.exports = {
   // use and caps the damage from a stuck retry loop in the UI.
   OUTREACH_RATE_LIMIT_PER_MINUTE: parseInt(process.env.OUTREACH_RATE_LIMIT_PER_MINUTE) || 30,
 
-  // SQLite – use absolute path so it always resolves to backend dir
-  SQLITE_PATH: process.env.SQLITE_PATH || path.join(__dirname, '../database.sqlite'),
+  // ── Database (Postgres / Supabase) ───────────────────────────────────────
+  // SQLite lived in the container filesystem, which this deployment wipes on
+  // every restart, deploy and idle spin-down — runs and imports were lost
+  // mid-flight. A hosted database is the only fix that does not depend on the
+  // instance staying alive.
+  //
+  // Supabase: Project Settings → Database → Connection string → URI. Prefer the
+  // pooler (port 6543); the instance opens few connections but reconnects often
+  // after a spin-down, which is exactly what the pooler is for.
+  DATABASE_URL: process.env.DATABASE_URL || '',
+  // Supabase presents a chain Node has no root for; traffic is still encrypted.
+  DATABASE_SSL: process.env.DATABASE_SSL !== 'false',
+  DATABASE_POOL_MAX: parseInt(process.env.DATABASE_POOL_MAX) || 5,
 
   // JWT
   JWT_SECRET: process.env.JWT_SECRET || 'supersecretjwt',
@@ -244,6 +255,16 @@ module.exports = {
   IMPORT_MAX_ROWS: parseInt(process.env.IMPORT_MAX_ROWS) || 200,
   IMPORT_MAX_FILE_MB: parseInt(process.env.IMPORT_MAX_FILE_MB) || 5,
   IMPORT_RUN_BUDGET_MS: parseInt(process.env.IMPORT_RUN_BUDGET_MS) || 900000,
+  // How much scraped text goes to the model per company. The token budget is
+  // the binding constraint on a free tier, and contact details cluster near the
+  // top of a contact or team page, so a slice is nearly as good as the whole
+  // page at a fraction of the cost.
+  AI_EXTRACT_CHARS_PER_PAGE: parseInt(process.env.AI_EXTRACT_CHARS_PER_PAGE) || 4000,
+  AI_EXTRACT_MAX_CHARS: parseInt(process.env.AI_EXTRACT_MAX_CHARS) || 9000,
+  // Rows in one import the model may read for. Each costs tokens, so only rows
+  // still missing something after the free extraction paths use one.
+  IMPORT_AI_EXTRACTIONS: parseInt(process.env.IMPORT_AI_EXTRACTIONS) || 60,
+
   // Rows in one import that may be looked up on Google Maps for a phone number.
   // Website scraping rarely yields a phone; Maps has one for almost every
   // trading business. Each lookup spends a credit, so only rows still missing a

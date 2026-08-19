@@ -59,17 +59,17 @@ class Lead {
       now,
       now,
     ];
-    query(sql, params);
+    await query(sql, params);
     return this.findById(id);
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM leads WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM leads WHERE id = ?', [id]);
     return result.rows[0];
   }
 
   static async findByHash(hash) {
-    const result = query('SELECT * FROM leads WHERE dedup_hash = ?', [hash]);
+    const result = await query('SELECT * FROM leads WHERE dedup_hash = ?', [hash]);
     return result.rows[0];
   }
 
@@ -81,7 +81,7 @@ class Lead {
    * fields live on lead_scores.
    */
   static async findByIdWithScore(id) {
-    const result = query(
+    const result = await query(
       `SELECT ${LIST_COLUMNS}
        FROM leads l
        LEFT JOIN lead_scores s ON l.id = s.lead_id
@@ -99,7 +99,7 @@ class Lead {
    * (which does join) looks fine.
    */
   static async listByIcp(icpId, limit = 100, offset = 0) {
-    const result = query(
+    const result = await query(
       `SELECT ${LIST_COLUMNS}
        FROM leads l
        LEFT JOIN lead_scores s ON l.id = s.lead_id
@@ -213,7 +213,7 @@ class Lead {
 
     params.push(Number(limit) || 200, Number(offset) || 0);
 
-    const result = query(
+    const result = await query(
       `SELECT ${LIST_COLUMNS}
        FROM leads l
        LEFT JOIN lead_scores s ON l.id = s.lead_id
@@ -241,7 +241,7 @@ class Lead {
     // leaving a stale reviewed_at would make the lead look decided.
     const reviewedAt = reviewStatus === 'pending' ? null : now;
 
-    query(
+    await query(
       `UPDATE leads
        SET review_status = ?, reviewed_at = ?, review_note = COALESCE(?, review_note), updated_at = ?
        WHERE id = ?`,
@@ -268,22 +268,23 @@ class Lead {
     const now = new Date().toISOString();
     const reviewedAt = reviewStatus === 'pending' ? null : now;
 
-    const { db } = require('../config/database');
-    const statement = db.prepare(
-      `UPDATE leads
-       SET review_status = ?, reviewed_at = ?, review_note = COALESCE(?, review_note), updated_at = ?
-       WHERE id = ?`
-    );
+    // One statement rather than one per id: a bulk accept of fifty leads was
+    // fifty prepared writes against a local file, which is now fifty network
+    // round trips. `= ANY($1)` does it in a single trip, and the transaction
+    // keeps the all-or-nothing behaviour the SQLite version had.
+    const { transaction } = require('../config/database');
 
-    const applyAll = db.transaction(leadIds => {
-      let updated = 0;
-      for (const leadId of leadIds) {
-        updated += statement.run(reviewStatus, reviewedAt, note, now, leadId).changes;
-      }
-      return updated;
+    const updated = await transaction(async run => {
+      const result = await run(
+        `UPDATE leads
+         SET review_status = ?, reviewed_at = ?, review_note = COALESCE(?, review_note), updated_at = ?
+         WHERE id = ANY(?)`,
+        [reviewStatus, reviewedAt, note, now, unique]
+      );
+      return result.rowCount;
     });
 
-    return { updated: applyAll(unique), ids: unique };
+    return { updated, ids: unique };
   }
 
   /**
@@ -314,7 +315,7 @@ class Lead {
     });
 
     const now = new Date().toISOString();
-    query(
+    await query(
       `UPDATE leads SET is_manual = 1, review_status = ?, reviewed_at = ?, updated_at = ? WHERE id = ?`,
       [data.review_status || 'accepted', now, now, lead.id]
     );
@@ -331,11 +332,11 @@ class Lead {
       params.push(icpId);
     }
 
-    const rows = query(
+    const rows = (await query(
       `SELECT COALESCE(review_status, 'pending') AS review_status, COUNT(*) AS count
        FROM leads ${where} GROUP BY COALESCE(review_status, 'pending')`,
       params
-    ).rows;
+    )).rows;
 
     const counts = { pending: 0, accepted: 0, rejected: 0, hold: 0 };
     for (const row of rows) {
@@ -347,7 +348,7 @@ class Lead {
   static async updateScore(id, scoreData) {
     const sql = `UPDATE leads SET updated_at = ?, status = ? WHERE id = ?`;
     const now = new Date().toISOString();
-    query(sql, [now, scoreData.status || 'scored', id]);
+    await query(sql, [now, scoreData.status || 'scored', id]);
     return this.findById(id);
   }
 
@@ -365,30 +366,34 @@ class Lead {
     fields.push('updated_at = ?');
     params.push(new Date().toISOString());
     params.push(id);
-    query(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`, params);
+    await query(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`, params);
     return this.findById(id);
   }
 
   static async delete(id) {
     // SQLite schema has no ON DELETE CASCADE — clear dependents first.
-    query('DELETE FROM signals WHERE lead_id = ?', [id]);
-    query('DELETE FROM lead_scores WHERE lead_id = ?', [id]);
-    query('DELETE FROM score_history WHERE lead_id = ?', [id]);
+    await query('DELETE FROM signals WHERE lead_id = ?', [id]);
+    await query('DELETE FROM lead_scores WHERE lead_id = ?', [id]);
+    await query('DELETE FROM score_history WHERE lead_id = ?', [id]);
 
     // Drafts and scheduled sends go with the lead: leaving a scheduled message
     // behind would mail a prospect the user had just deleted. Messages already
     // sent are kept — the log is a record of what happened, and deleting the
     // lead does not un-send them.
-    query(`DELETE FROM messages WHERE lead_id = ? AND status != 'sent'`, [id]);
+    await query(`DELETE FROM messages WHERE lead_id = ? AND status != 'sent'`, [id]);
 
-    const result = query('DELETE FROM leads WHERE id = ?', [id]);
+    const result = await query('DELETE FROM leads WHERE id = ?', [id]);
     return result.rowCount > 0;
   }
 
   static async getStats() {
-    const total = query('SELECT COUNT(*) as count FROM leads').rows[0].count;
-    const byTier = query('SELECT tier, COUNT(*) as count FROM lead_scores GROUP BY tier').rows;
-    const recent = query(`SELECT COUNT(*) as count FROM leads WHERE created_at >= datetime('now', '-7 days')`).rows[0].count;
+    const total = (await query('SELECT COUNT(*) as count FROM leads')).rows[0].count;
+    const byTier = (await query('SELECT tier, COUNT(*) as count FROM lead_scores GROUP BY tier')).rows;
+    // The cutoff is computed here rather than in SQL: created_at holds an ISO
+    // string, so comparing it against a database-side timestamp would compare
+    // two different text formats.
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const recent = (await query('SELECT COUNT(*) AS count FROM leads WHERE created_at >= ?', [weekAgo])).rows[0].count;
     const review = await this.getReviewCounts();
     return { total, byTier, recent, review };
   }

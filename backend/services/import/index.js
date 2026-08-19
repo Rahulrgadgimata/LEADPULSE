@@ -8,6 +8,7 @@ const { query } = require('../../config/database');
 const { mapWithConcurrency } = require('../../utils/concurrency');
 const runBudget = require('../discovery/runBudget');
 const MapsLookup = require('./mapsLookup');
+const { AiExtractor, toKnownField } = require('./aiExtractor');
 
 /**
  * Turn an uploaded spreadsheet of companies into scored leads with contacts.
@@ -47,7 +48,7 @@ class ImportService {
    * @param {Array}  opts.rows        parsed sheet rows
    * @param {Function} opts.updateProgress
    */
-  static async run(jobId, { icpId, rows, updateProgress }) {
+  static async run(jobId, { icpId, rows, updateProgress, fields = [] }) {
     runBudget.start(config.IMPORT_RUN_BUDGET_MS);
 
     try {
@@ -58,10 +59,13 @@ class ImportService {
         created: 0, duplicates: 0, enriched: 0,
         withEmail: 0, withPhone: 0, withBuyer: 0,
         complete: 0, partial: 0, nothing: 0,
-        viaMaps: 0, failed: 0, skipped: 0
+        viaMaps: 0, viaAi: 0, failed: 0, skipped: 0
       };
-      // Shared across the concurrent workers, so the allowance is per import.
+      // Shared across the concurrent workers, so each allowance is per import.
       let mapsLookupsLeft = config.IMPORT_MAPS_LOOKUPS;
+      let aiExtractionsLeft = config.IMPORT_AI_EXTRACTIONS;
+
+      if (fields.length) logger.info(`Import will look for: ${fields.join(', ')}`);
       const report = [];
       const total = rows.length;
       let completed = 0;
@@ -116,7 +120,7 @@ class ImportService {
 
           // A phone number from the sheet is worth keeping even on a duplicate.
           if (row.contact_phone) {
-            query(
+            await query(
               `UPDATE leads SET contact_phone = COALESCE(NULLIF(contact_phone, ''), ?) WHERE id = ?`,
               [row.contact_phone, lead.id]
             );
@@ -133,17 +137,17 @@ class ImportService {
           // Websites seldom publish a phone number; Maps almost always has one.
           // Only rows still missing it spend a credit, and only while the
           // per-import allowance lasts.
-          const beforeMaps = query(
+          const beforeMaps = (await query(
             'SELECT company_name, company_website, company_location, contact_phone FROM leads WHERE id = ?',
             [lead.id]
-          ).rows[0] || {};
+          )).rows[0] || {};
 
           if (!beforeMaps.contact_phone && mapsLookupsLeft > 0 && MapsLookup.available && !runBudget.expired()) {
             mapsLookupsLeft--;
             try {
               const found = await MapsLookup.find(beforeMaps);
               if (found?.phone) {
-                query(
+                await query(
                   `UPDATE leads SET contact_phone = ?,
                      company_location = COALESCE(NULLIF(company_location, ''), ?),
                      updated_at = ? WHERE id = ?`,
@@ -158,19 +162,75 @@ class ImportService {
             }
           }
 
+          // Everything above is pattern matching, which only finds a detail
+          // written as one. Read the pages for whatever is still missing — a
+          // founder named in prose, an address written "jane [at] acme.io", or
+          // any field the user asked for that has no rule of its own.
+          if (fields.length && aiExtractionsLeft > 0 && AiExtractor.available && !runBudget.expired()) {
+            const current = (await query(
+              `SELECT company_name, company_website, contact_email, contact_phone,
+                      contact_name, contact_title, contact_linkedin, company_location,
+                      company_size, company_industry, company_description, extracted_json
+               FROM leads WHERE id = ?`,
+              [lead.id]
+            )).rows[0] || {};
+
+            const missing = fields.filter(field => {
+              const column = toKnownField(field);
+              return !column || !current[column];
+            });
+
+            if (missing.length && current.company_website) {
+              aiExtractionsLeft--;
+              try {
+                const found = await AiExtractor.extract({
+                  companyName: current.company_name,
+                  website: current.company_website,
+                  pages: await this._fetchPages(current.company_website),
+                  fields,
+                  missing
+                });
+                if (found) {
+                  await this._applyExtraction(lead.id, found, current);
+                  entry.viaAi = Object.keys(found);
+                  stats.viaAi++;
+                }
+              } catch (aiErr) {
+                logger.debug(`AI extraction failed for ${current.company_name}: ${aiErr.message}`);
+              }
+            }
+          }
+
           await ScoringService.compute(lead.id);
 
-          const after = query(
+          const after = (await query(
             `SELECT company_website, contact_email, contact_phone, contact_name,
-                    contact_title, contact_linkedin
+                    contact_title, contact_linkedin, extracted_json
              FROM leads WHERE id = ?`,
             [lead.id]
-          ).rows[0] || {};
+          )).rows[0] || {};
 
           entry.website = after.company_website || entry.website;
           for (const [field, label] of CONTACT_FIELDS) {
             if (after[field]) entry.found[label] = after[field];
             else entry.notFound.push(label);
+          }
+
+          // Fields the user asked for that have no column of their own are
+          // reported exactly like the standard ones — they were requested the
+          // same way, so "not found" has to mean the same thing for both.
+          if (after.extracted_json) {
+            try {
+              for (const [key, value] of Object.entries(JSON.parse(after.extracted_json))) {
+                if (value) entry.found[key] = value;
+              }
+            } catch (err) {
+              logger.debug(`Unreadable extracted_json on lead ${lead.id}`);
+            }
+          }
+          for (const field of fields) {
+            const label = CONTACT_FIELDS.find(([, l]) => l === field)?.[1] || field;
+            if (!entry.found[label] && !entry.notFound.includes(label)) entry.notFound.push(label);
           }
 
           if (after.contact_email) stats.withEmail++;
@@ -209,13 +269,13 @@ class ImportService {
         }
       });
 
-      query(`UPDATE icps SET last_run_at = ? WHERE id = ?`, [new Date().toISOString(), icp.id]);
+      await query(`UPDATE icps SET last_run_at = ? WHERE id = ?`, [new Date().toISOString(), icp.id]);
 
       // Keep the sheet's original order so the report reads like the upload.
       const order = new Map(rows.map((r, i) => [r.company_name, i]));
       report.sort((a, b) => (order.get(a.company) ?? 0) - (order.get(b.company) ?? 0));
 
-      query(
+      await query(
         `UPDATE discovery_jobs SET result_json = ? WHERE id = ?`,
         [JSON.stringify({ stats, rows: report }), jobId]
       );
@@ -246,6 +306,7 @@ class ImportService {
     parts.push(`${stats.withPhone} with a phone`);
     parts.push(`${stats.withBuyer} with a named contact`);
     if (stats.viaMaps) parts.push(`${stats.viaMaps} phone number(s) from Google Maps`);
+    if (stats.viaAi) parts.push(`${stats.viaAi} filled in by reading the site`);
     if (stats.nothing) parts.push(`${stats.nothing} with no contact found`);
     if (stats.failed) parts.push(`${stats.failed} failed`);
     if (stats.skipped) parts.push(`${stats.skipped} skipped`);

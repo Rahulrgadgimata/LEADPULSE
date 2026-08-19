@@ -5,11 +5,11 @@ const config = require('../config/env');
 const INTEGER_FIELDS = new Set(['company_size_min', 'company_size_max', 'is_active']);
 
 /**
- * Coerce a value into something SQLite can bind.
+ * Coerce a form value into what the column expects.
  *
- * better-sqlite3 accepts only numbers, strings, bigints, buffers and null — it
- * throws on booleans, which is exactly what an HTML checkbox sends for
- * `is_active`, and on NaN from a blank numeric input.
+ * `is_active` and the size bounds are INTEGER columns, while an HTML checkbox
+ * sends a boolean and a blank numeric input sends NaN. Lists are stored as JSON
+ * text. Postgres would reject or mis-store all three unmapped.
  */
 function toSqliteValue(key, value) {
   if (Array.isArray(value)) return JSON.stringify(value);
@@ -44,7 +44,7 @@ class ICP {
         company_size_max, geographies, job_titles, keywords, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
-    query(sql, [
+    await query(sql, [
       id,
       icpData.user_id || null,
       icpData.name,
@@ -71,7 +71,7 @@ class ICP {
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM icps WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM icps WHERE id = ?', [id]);
     return result.rows[0] || null;
   }
 
@@ -79,7 +79,7 @@ class ICP {
    * List all ICPs
    */
   static async listAll() {
-    const result = query('SELECT * FROM icps ORDER BY COALESCE(updated_at, created_at) DESC');
+    const result = await query('SELECT * FROM icps ORDER BY COALESCE(updated_at, created_at) DESC');
     return result.rows;
   }
 
@@ -87,7 +87,7 @@ class ICP {
    * List all ICPs for a user
    */
   static async listByUser(userId) {
-    const result = query(
+    const result = await query(
       'SELECT * FROM icps WHERE user_id = ? ORDER BY created_at DESC',
       [userId]
     );
@@ -103,7 +103,7 @@ class ICP {
    * whenever something had to pick a target.
    */
   static async listActive() {
-    const result = query(
+    const result = await query(
       'SELECT * FROM icps WHERE is_active = 1 ORDER BY COALESCE(updated_at, created_at) DESC'
     );
     return result.rows;
@@ -155,7 +155,7 @@ class ICP {
     fields.push('updated_at = ?');
     params.push(new Date().toISOString());
     params.push(id);
-    query(`UPDATE icps SET ${fields.join(', ')} WHERE id = ?`, params);
+    await query(`UPDATE icps SET ${fields.join(', ')} WHERE id = ?`, params);
     return this.findById(id);
   }
 
@@ -163,7 +163,7 @@ class ICP {
    * Delete an ICP
    */
   static async delete(id) {
-    const result = query('DELETE FROM icps WHERE id = ?', [id]);
+    const result = await query('DELETE FROM icps WHERE id = ?', [id]);
     return result.rowCount > 0;
   }
 }

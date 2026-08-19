@@ -36,9 +36,9 @@ class Suppression {
     }
 
     if (clean) {
-      const existing = query('SELECT * FROM suppressions WHERE email = ?', [clean]).rows[0];
+      const existing = (await query('SELECT * FROM suppressions WHERE email = ?', [clean])).rows[0];
       if (existing) {
-        query(
+        await query(
           'UPDATE suppressions SET reason = ?, source = ?, evidence = ?, lead_id = COALESCE(?, lead_id) WHERE id = ?',
           [reason || existing.reason, source, String(evidence || '').slice(0, 2000), lead_id, existing.id]
         );
@@ -47,7 +47,7 @@ class Suppression {
     }
 
     const id = uuidv4();
-    query(
+    await query(
       `INSERT INTO suppressions (id, email, domain, reason, source, evidence, lead_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -65,7 +65,7 @@ class Suppression {
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM suppressions WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM suppressions WHERE id = ?', [id]);
     return result.rows[0] || null;
   }
 
@@ -80,21 +80,21 @@ class Suppression {
     const clean = this.normaliseEmail(email);
     if (!clean) return null;
 
-    const byEmail = query('SELECT * FROM suppressions WHERE email = ?', [clean]).rows[0];
+    const byEmail = (await query('SELECT * FROM suppressions WHERE email = ?', [clean])).rows[0];
     if (byEmail) return byEmail;
 
     const domain = this.domainOf(clean);
     if (!domain) return null;
 
-    const byDomain = query(
+    const byDomain = (await query(
       'SELECT * FROM suppressions WHERE domain IS NOT NULL AND domain = ?',
       [domain]
-    ).rows[0];
+    )).rows[0];
     return byDomain || null;
   }
 
   static async list(limit = 500) {
-    const result = query(
+    const result = await query(
       'SELECT * FROM suppressions ORDER BY created_at DESC LIMIT ?',
       [Number(limit) || 500]
     );
@@ -102,7 +102,7 @@ class Suppression {
   }
 
   static async delete(id) {
-    const result = query('DELETE FROM suppressions WHERE id = ?', [id]);
+    const result = await query('DELETE FROM suppressions WHERE id = ?', [id]);
     return result.rowCount > 0;
   }
 }

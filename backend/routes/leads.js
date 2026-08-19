@@ -112,22 +112,30 @@ router.get('/filter-options', async (req, res) => {
       params.push(req.query.icpId);
     }
 
-    const distinct = column => query(
+    const distinct = async column => (await query(
       `SELECT DISTINCT ${column} AS value FROM leads ${where}
        ${where ? 'AND' : 'WHERE'} ${column} IS NOT NULL AND ${column} != ''
        ORDER BY value`,
       params
-    ).rows.map(r => r.value);
+    )).rows.map(r => r.value);
+
+    // The three lists are independent, so they run together rather than in
+    // sequence — three round trips to a hosted database, not one after another.
+    const [locations, industries, sources] = await Promise.all([
+      distinct('company_location'),
+      distinct('company_industry'),
+      distinct('source')
+    ]);
 
     // Location is stored free-text ("Austin, TX, United States"); the last
     // comma-separated part is the closest thing to a country the data has.
     const countries = [...new Set(
-      distinct('company_location').map(loc => String(loc).split(',').pop().trim()).filter(Boolean)
+      locations.map(loc => String(loc).split(',').pop().trim()).filter(Boolean)
     )].sort();
 
     res.json({
-      industries: distinct('company_industry'),
-      sources: distinct('source'),
+      industries,
+      sources,
       geographies: countries,
       tiers: ['hot', 'warm', 'cold'],
       reviewStatuses: Lead.REVIEW_STATUSES,
@@ -325,10 +333,10 @@ router.get('/:id', async (req, res) => {
     const lead = await Lead.findById(req.params.id);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const scoreResult = query('SELECT * FROM lead_scores WHERE lead_id = ?', [lead.id]);
+    const scoreResult = await query('SELECT * FROM lead_scores WHERE lead_id = ?', [lead.id]);
     const score = scoreResult.rows[0];
 
-    const historyResult = query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at ASC', [lead.id]);
+    const historyResult = await query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at ASC', [lead.id]);
     const history = historyResult.rows;
 
     const signals = await Signal.listByLead(lead.id);

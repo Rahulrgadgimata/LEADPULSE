@@ -402,7 +402,7 @@ async function handleUnsubscribe(req, res) {
     });
 
     const { query } = require('../config/database');
-    query(
+    await query(
       `UPDATE messages SET status = 'cancelled', error_message = 'Cancelled: recipient unsubscribed', updated_at = ?
        WHERE LOWER(to_email) = ? AND status IN ('draft', 'scheduled')`,
       [new Date().toISOString(), String(message.to_email || '').toLowerCase()]

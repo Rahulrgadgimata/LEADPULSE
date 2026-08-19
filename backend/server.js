@@ -11,16 +11,21 @@ const { validateConfig } = require('./config/validate');
 // Fail fast on bad production config before anything binds a port.
 validateConfig();
 
-// Initialize database (creates tables if not exist)
-require('./config/database');
-
-// Discovery runs in-process, so any job that was executing when the previous
-// process exited is dead. Reconcile immediately rather than leaving rows that
-// report 'running' and block new runs.
-{
-  const swept = require('./services/discovery').sweepStalledJobs(true);
-  if (swept > 0) logger.warn(`Reconciled ${swept} discovery job(s) orphaned by a previous shutdown.`);
-}
+// The schema now lives in Postgres, so it has to exist before anything queries
+// it — and the orphan sweep below is itself a query. Both happen before the
+// port is bound, so no request can arrive against a half-built database.
+const databaseReady = require('./config/database').init()
+  .then(async () => {
+    // Discovery runs in-process, so any job that was executing when the
+    // previous process exited is dead. Reconcile immediately rather than
+    // leaving rows that report 'running' and block new runs.
+    const swept = await require('./services/discovery').sweepStalledJobs(true);
+    if (swept > 0) logger.warn(`Reconciled ${swept} discovery job(s) orphaned by a previous shutdown.`);
+  })
+  .catch(err => {
+    logger.error(`Database initialisation failed: ${err.message}`);
+    throw err;
+  });
 
 // Route imports
 const authRoutes = require('./routes/auth');
@@ -314,26 +319,35 @@ app.use((err, req, res, next) => {
 
 // ─── Start Server ───────────────────────────────────
 const PORT = config.PORT;
-app.listen(PORT, () => {
-  logger.info(`═══════════════════════════════════════════════`);
-  logger.info(`  LeadPulse AI Server running on port ${PORT}`);
-  logger.info(`  UI: http://localhost:${PORT}`);
-  logger.info(`  API: http://localhost:${PORT}/api`);
-  logger.info(`═══════════════════════════════════════════════`);
+// Bind the port only once the schema exists. Serving requests against a
+// half-built database would fail them one by one with confusing errors; a
+// database that cannot be reached at all should stop the boot outright, so the
+// platform restarts us rather than running a broken instance.
+databaseReady.then(() => {
+  app.listen(PORT, () => {
+    logger.info(`═══════════════════════════════════════════════`);
+    logger.info(`  LeadPulse AI Server running on port ${PORT}`);
+    logger.info(`  UI: http://localhost:${PORT}`);
+    logger.info(`  API: http://localhost:${PORT}/api`);
+    logger.info(`═══════════════════════════════════════════════`);
 
-  // Scheduled sends are polled from the database rather than held in memory,
-  // so messages that came due while the process was down still go out — the
-  // first tick runs immediately on boot for exactly that case.
-  require('./services/outreach/scheduler').start();
+    // Scheduled sends are polled from the database rather than held in memory,
+    // so messages that came due while the process was down still go out — the
+    // first tick runs immediately on boot for exactly that case.
+    require('./services/outreach/scheduler').start();
 
-  // Warm the Scrapling sidecar so the first discovery run is not cold-starting
-  // Python + curl_cffi mid-search.
-  if (config.SCRAPLING_ENABLED) {
-    require('./services/scraplingClient').ensureStarted().then(ok => {
-      if (ok) logger.info('Scrapling scrape engine ready.');
-      else logger.warn('Scrapling unavailable — Node scrapers will run without it.');
-    }).catch(err => logger.warn(`Scrapling boot: ${err.message}`));
-  }
+    // Warm the Scrapling sidecar so the first discovery run is not cold-starting
+    // Python + curl_cffi mid-search.
+    if (config.SCRAPLING_ENABLED) {
+      require('./services/scraplingClient').ensureStarted().then(ok => {
+        if (ok) logger.info('Scrapling scrape engine ready.');
+        else logger.warn('Scrapling unavailable — Node scrapers will run without it.');
+      }).catch(err => logger.warn(`Scrapling boot: ${err.message}`));
+    }
+  });
+}).catch(err => {
+  logger.error(`Server did not start: ${err.message}`);
+  process.exit(1);
 });
 
 module.exports = app;

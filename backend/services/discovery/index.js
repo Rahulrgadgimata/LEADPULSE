@@ -89,7 +89,7 @@ class DiscoveryService {
 
     // A run already working on this exact target is what the user is asking
     // for, so join it rather than restarting it from zero.
-    const active = this._findActiveJob(icp.id);
+    const active = await this._findActiveJob(icp.id);
     if (active && active.status === 'running') {
       logger.info(`Discovery for "${icp.name}" already running; attaching to job ${active.id}.`);
       return {
@@ -107,7 +107,7 @@ class DiscoveryService {
     // on. Manual runs therefore cancel what is there and take its place.
     let preempted = false;
     if (triggerType === 'manual') {
-      preempted = this._preemptFor(icp);
+      preempted = await this._preemptFor(icp);
     } else if (active) {
       return {
         jobId: active.id,
@@ -132,14 +132,16 @@ class DiscoveryService {
     // Every job starts life as 'queued'. The pump promotes it to 'running' when
     // its turn comes, so the row and the scheduler can never disagree about
     // what is executing.
-    query(
+    await query(
       `INSERT INTO discovery_jobs (id, icp_id, status, trigger_type, started_at, last_progress_at, progress, status_text)
        VALUES (?, ?, 'queued', ?, ?, ?, 0, ?)`,
       [jobId, icp.id, triggerType, now, now, 'Queued...']
     );
 
     queue.push({ jobId, icpId: icp.id, icpName: icp.name, enqueuedAt: Date.now() });
-    this._pump();
+    // Awaited because the state reported below depends on whether this job just
+    // became the active run.
+    await this._pump();
 
     const state = activeRun?.jobId === jobId ? 'running' : 'queued';
     return {
@@ -168,12 +170,12 @@ class DiscoveryService {
    * @param {string} opts.startText  first status line the UI shows
    * @param {boolean} [opts.preempt] cancel whatever is running first
    */
-  static enqueueJob({ icp, execute, label = 'Job', startText = 'Starting...', triggerType = 'import', preempt = true }) {
-    if (preempt) this._preemptFor(icp);
+  static async enqueueJob({ icp, execute, label = 'Job', startText = 'Starting...', triggerType = 'import', preempt = true }) {
+    if (preempt) await this._preemptFor(icp);
 
     const jobId = uuidv4();
     const now = new Date().toISOString();
-    query(
+    await query(
       `INSERT INTO discovery_jobs (id, icp_id, status, trigger_type, started_at, last_progress_at, progress, status_text)
        VALUES (?, ?, 'queued', ?, ?, ?, 0, ?)`,
       [jobId, icp.id, triggerType, now, now, 'Queued...']
@@ -188,7 +190,7 @@ class DiscoveryService {
       label,
       startText
     });
-    this._pump();
+    await this._pump();
 
     return {
       jobId,
@@ -197,19 +199,27 @@ class DiscoveryService {
     };
   }
 
-  /** Progress writer shared by every job type. */
+  /**
+   * Progress writer shared by every job type.
+   *
+   * Deliberately not awaited by its callers. Progress is advisory — collectors
+   * fire it from inside their own callbacks, and a write that is slow, late or
+   * lost costs a stale status line and nothing more. Awaiting it would thread
+   * async through every collector's onProgress for no benefit, and a failing
+   * status write must never be able to fail the run it is describing.
+   */
   static progressWriter(jobId) {
     return (progress, statusText) => {
       query(
         `UPDATE discovery_jobs SET progress = ?, status_text = ?, last_progress_at = ? WHERE id = ?`,
         [progress, statusText, new Date().toISOString(), jobId]
-      );
+      ).catch(err => logger.debug(`Progress write failed for job ${jobId}: ${err.message}`));
     };
   }
 
   /** Mark a job finished. Used by job types that are not discovery runs. */
-  static completeJob(jobId, statusText) {
-    query(
+  static async completeJob(jobId, statusText) {
+    await query(
       `UPDATE discovery_jobs SET status = 'completed', progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
       [statusText, new Date().toISOString(), jobId]
     );
@@ -223,14 +233,14 @@ class DiscoveryService {
    * their next budget check — so the new run starts from _pump() in the old
    * run's `finally`, typically within a few seconds.
    */
-  static _preemptFor(icp) {
+  static async _preemptFor(icp) {
     const superseded = `Superseded by a new discovery run for "${icp.name}".`;
     let stoppedSomething = false;
 
     // Drop the waiting queue first, so nothing else claims the slot in between.
     while (queue.length > 0) {
       const dropped = queue.shift();
-      query(
+      await query(
         `UPDATE discovery_jobs SET status = 'cancelled', failed_reason = ?, completed_at = ? WHERE id = ?`,
         [superseded, new Date().toISOString(), dropped.jobId]
       );
@@ -248,7 +258,7 @@ class DiscoveryService {
 
     if (activeRun) {
       preempting = true;
-      query(
+      await query(
         `UPDATE discovery_jobs SET status_text = ? WHERE id = ?`,
         ['Stopping — superseded by a newer run.', activeRun.jobId]
       );
@@ -264,16 +274,18 @@ class DiscoveryService {
    * Start the next queued run if nothing is executing and the cooldown has
    * passed; otherwise arm a timer for the moment it has.
    */
-  static _pump() {
+  static async _pump() {
     if (activeRun || queue.length === 0) return;
 
     const wait = nextRunAllowedAt - Date.now();
     if (wait > 0) {
-      this._describeQueue();
+      await this._describeQueue();
       if (!pumpTimer) {
         pumpTimer = setTimeout(() => {
           pumpTimer = null;
-          this._pump();
+          // Detached: nothing is awaiting the timer, so a failure here would
+          // otherwise be an unhandled rejection and the queue would stall.
+          this._pump().catch(err => logger.error(`Scheduler pump failed: ${err.message}`));
         }, wait + 250);
         if (typeof pumpTimer.unref === 'function') pumpTimer.unref();
       }
@@ -284,7 +296,7 @@ class DiscoveryService {
     activeRun = { jobId: next.jobId, icpId: next.icpId };
 
     const now = new Date().toISOString();
-    query(
+    await query(
       `UPDATE discovery_jobs SET status = 'running', started_at = ?, last_progress_at = ?, status_text = ? WHERE id = ?`,
       [now, now, next.startText || 'Starting discovery...', next.jobId]
     );
@@ -303,12 +315,12 @@ class DiscoveryService {
       : this._executeCollectors(next.jobId, next.icpId);
 
     work
-      .catch(err => {
+      .catch(async err => {
         logger.error(`Discovery job ${next.jobId} failed:`, err);
-        query(
+        await query(
           `UPDATE discovery_jobs SET status = 'failed', failed_reason = ?, completed_at = ? WHERE id = ?`,
           [err.message, new Date().toISOString(), next.jobId]
-        );
+        ).catch(writeErr => logger.error(`Could not record the failure: ${writeErr.message}`));
       })
       .finally(() => {
         activeRun = null;
@@ -319,7 +331,7 @@ class DiscoveryService {
         if (preempting) {
           preempting = false;
           nextRunAllowedAt = 0;
-          this._pump();
+          this._pump().catch(err => logger.error(`Scheduler pump failed: ${err.message}`));
           return;
         }
         // The cooldown is the point of the queue: back-to-back runs hit the
@@ -331,24 +343,30 @@ class DiscoveryService {
             `${Math.round(config.DISCOVERY_COOLDOWN_MS / 1000)}s.`
           );
         }
-        this._pump();
+        this._pump().catch(err => logger.error(`Scheduler pump failed: ${err.message}`));
       });
 
-    this._describeQueue();
+    await this._describeQueue();
   }
 
-  /** Keep every waiting job's row explaining why it has not started yet. */
-  static _describeQueue() {
-    queue.forEach((entry, index) => {
+  /**
+   * Keep every waiting job's row explaining why it has not started yet.
+   *
+   * Like the progress writer, this is advisory: it updates text nobody's
+   * correctness depends on, so the rows are written together and a failure is
+   * logged rather than propagated into the scheduler.
+   */
+  static async _describeQueue() {
+    await Promise.all(queue.map((entry, index) => {
       const startsIn = Math.round(this._estimatedStartMs(entry.jobId) / 1000);
       const text = index === 0 && !activeRun
         ? `Waiting out the cooldown between runs — starts in about ${startsIn}s.`
         : `Queued behind ${index + 1} run${index === 0 ? '' : 's'} — starts in about ${Math.round(startsIn / 60)} min.`;
-      query(
+      return query(
         `UPDATE discovery_jobs SET status_text = ?, last_progress_at = ? WHERE id = ? AND status = 'queued'`,
         [text, new Date().toISOString(), entry.jobId]
-      );
-    });
+      ).catch(err => logger.debug(`Queue status write failed: ${err.message}`));
+    }));
   }
 
   /** 0 when running, 1-based place in line when queued, null when unknown. */
@@ -384,11 +402,12 @@ class DiscoveryService {
   }
 
   static async _executeCollectors(jobId, icpId) {
+    // Fire-and-forget, for the reason given on progressWriter above.
     const updateProgress = (progress, statusText) => {
       query(
         `UPDATE discovery_jobs SET progress = ?, status_text = ?, last_progress_at = ? WHERE id = ?`,
         [progress, statusText, new Date().toISOString(), jobId]
-      );
+      ).catch(err => logger.debug(`Progress write failed for job ${jobId}: ${err.message}`));
     };
 
     try {
@@ -541,7 +560,7 @@ class DiscoveryService {
           ? 'Search engines blocked the scraper. Retry later, or optionally set BRAVE_API_KEY / SERPER_API_KEY in .env for more reliable volume.'
           : 'No prospects found. Check logs — a source may be rate-limited.';
         updateProgress(100, message);
-        query(
+        await query(
           `UPDATE discovery_jobs SET status = 'completed', progress = 100, completed_at = ? WHERE id = ?`,
           [new Date().toISOString(), jobId]
         );
@@ -558,7 +577,7 @@ class DiscoveryService {
       // still contributes what it had — it just says so rather than claiming
       // to have finished the sweep.
       const cancelled = runBudget.isCancelled();
-      query(
+      await query(
         `UPDATE discovery_jobs SET status = ?, progress = 100, status_text = ?, completed_at = ? WHERE id = ?`,
         [
           cancelled ? 'cancelled' : 'completed',
@@ -574,7 +593,7 @@ class DiscoveryService {
         ]
       );
 
-      query(`UPDATE icps SET last_run_at = ? WHERE id = ?`, [new Date().toISOString(), icp.id]);
+      await query(`UPDATE icps SET last_run_at = ? WHERE id = ?`, [new Date().toISOString(), icp.id]);
 
       logger.info(
         `Discovery job ${jobId} completed. items=${allDiscovered.length} ` +
@@ -600,17 +619,17 @@ class DiscoveryService {
    * leave a row that blocks every future run. Anything the scheduler does not
    * know about, or that stopped writing progress, is treated as abandoned.
    */
-  static _findActiveJob(icpId) {
-    const rows = query(
+  static async _findActiveJob(icpId) {
+    const rows = (await query(
       `SELECT id, status, progress, started_at, last_progress_at FROM discovery_jobs
        WHERE icp_id = ? AND status IN ('running', 'queued')
        ORDER BY started_at DESC`,
       [icpId]
-    ).rows;
+    )).rows;
 
     let active = null;
     for (const job of rows) {
-      if (this._isStalled(job)) this._failStalled(job);
+      if (this._isStalled(job)) await this._failStalled(job);
       else if (!active) active = job;
     }
     return active;
@@ -642,20 +661,20 @@ class DiscoveryService {
    * Sweep every stalled job, regardless of ICP. Used by the jobs listing so it
    * cannot show a run as 'running' when nothing is executing it.
    */
-  static sweepStalledJobs(force = false) {
-    const rows = query(
+  static async sweepStalledJobs(force = false) {
+    const rows = (await query(
       `SELECT id, status, started_at, last_progress_at FROM discovery_jobs
        WHERE status IN ('running', 'queued')`
-    ).rows;
+    )).rows;
     let swept = 0;
     for (const job of rows) {
-      if (force || this._isStalled(job)) { this._failStalled(job); swept++; }
+      if (force || this._isStalled(job)) { await this._failStalled(job); swept++; }
     }
     return swept;
   }
 
-  static _failStalled(job) {
-    query(
+  static async _failStalled(job) {
+    await query(
       `UPDATE discovery_jobs SET status = 'failed', failed_reason = ?, completed_at = ? WHERE id = ?`,
       [
         job.status === 'queued'
@@ -704,7 +723,8 @@ class DiscoveryService {
    *
    * At 150+ leads a sequential loop spends minutes waiting on enrichment HTTP
    * calls, so items run in parallel — capped to stay inside provider rate
-   * limits. better-sqlite3 is synchronous, so DB writes remain safe.
+   * limits. Each worker awaits its own writes, and the per-item work is
+   * independent, so concurrency here costs nothing in consistency.
    */
   static async _processItems(items, icp, updateProgress) {
     const total = items.length;
@@ -777,7 +797,7 @@ class DiscoveryService {
           // the collector, or a country-coded domain, both of which are free to
           // read. A lead whose location is merely *unknown* still goes through
           // enrichment, which is what resolves most of them.
-          const early = this._checkGeography(lead.id, icp, { onlyIfKnown: true });
+          const early = await this._checkGeography(lead.id, icp, { onlyIfKnown: true });
           if (!early.ok) {
             stats.outsideGeography++;
             return;
@@ -788,7 +808,7 @@ class DiscoveryService {
           // Re-check with everything enrichment resolved. Most leads reach this
           // point with no location at all, so this is where a news-derived lead
           // is finally placed.
-          const verdict = this._checkGeography(lead.id, icp);
+          const verdict = await this._checkGeography(lead.id, icp);
           if (!verdict.ok) {
             stats.outsideGeography++;
             return;
@@ -875,11 +895,11 @@ class DiscoveryService {
    *   location is simply undetermined passes, because enrichment is what
    *   resolves most of them — rejecting unknowns here would empty the pipeline.
    */
-  static _checkGeography(leadId, icp, opts = {}) {
+  static async _checkGeography(leadId, icp, opts = {}) {
     const geographies = parseIcpList(icp.geographies);
     if (geographies.length === 0) return { ok: true };
 
-    const row = query('SELECT * FROM leads WHERE id = ?', [leadId]).rows[0];
+    const row = (await query('SELECT * FROM leads WHERE id = ?', [leadId])).rows[0];
     if (!row) return { ok: true };
 
     // raw_signal_data is stored as JSON text; the query that found the lead is
@@ -902,7 +922,7 @@ class DiscoveryService {
       // Record an inferred location so the dashboard shows where a lead is and
       // the scorer can credit the geography match.
       if (!row.company_location && verdict.location) {
-        query('UPDATE leads SET company_location = ? WHERE id = ?', [verdict.location, leadId]);
+        await query('UPDATE leads SET company_location = ? WHERE id = ?', [verdict.location, leadId]);
       }
       return verdict;
     }
@@ -912,22 +932,22 @@ class DiscoveryService {
       return { ok: true };
     }
 
-    query('DELETE FROM signals WHERE lead_id = ?', [leadId]);
-    query('DELETE FROM leads WHERE id = ?', [leadId]);
+    await query('DELETE FROM signals WHERE lead_id = ?', [leadId]);
+    await query('DELETE FROM leads WHERE id = ?', [leadId]);
     logger.debug(`Dropped ${row.company_name}: ${verdict.reason} (from ${verdict.basis})`);
     return verdict;
   }
 
   static async getJobStatus(jobId) {
-    const result = query('SELECT * FROM discovery_jobs WHERE id = ?', [jobId]);
+    const result = await query('SELECT * FROM discovery_jobs WHERE id = ?', [jobId]);
     let job = result.rows[0];
     if (!job) return null;
 
     // Surface a dead run to the poller instead of reporting 'running' forever,
     // which left the UI stuck on a progress bar that could never advance.
     if ((job.status === 'running' || job.status === 'queued') && this._isStalled(job)) {
-      this._failStalled(job);
-      job = query('SELECT * FROM discovery_jobs WHERE id = ?', [jobId]).rows[0];
+      await this._failStalled(job);
+      job = (await query('SELECT * FROM discovery_jobs WHERE id = ?', [jobId])).rows[0];
     }
 
     return {

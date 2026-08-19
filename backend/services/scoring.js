@@ -80,16 +80,16 @@ class ScoringService {
       const now = new Date().toISOString();
 
       // Upsert lead_scores
-      const checkScore = query('SELECT id FROM lead_scores WHERE lead_id = ?', [leadId]);
+      const checkScore = await query('SELECT id FROM lead_scores WHERE lead_id = ?', [leadId]);
       if (checkScore.rows.length > 0) {
-        query(
+        await query(
           `UPDATE lead_scores 
            SET total_score=?, intent_score=?, profile_fit_score=?, company_fit_score=?, recency_score=?, engagement_score=?, tier=?, explanation_text=?, is_manual_override=0, scored_at=? 
            WHERE lead_id=?`,
           [total_score, intent_score, profile_fit_score, company_fit_score, recency_score, engagement_score, tier, explanation_text, now, leadId]
         );
       } else {
-        query(
+        await query(
           `INSERT INTO lead_scores (id, lead_id, total_score, intent_score, profile_fit_score, company_fit_score, recency_score, engagement_score, tier, explanation_text, is_manual_override, scored_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)`,
           [scoreId, leadId, total_score, intent_score, profile_fit_score, company_fit_score, recency_score, engagement_score, tier, explanation_text, now]
@@ -247,7 +247,7 @@ class ScoringService {
 
     const now = new Date().toISOString();
 
-    query(
+    await query(
       `UPDATE lead_scores 
        SET total_score=?, tier=?, explanation_text=?, is_manual_override=1, scored_at=? 
        WHERE lead_id=?`,

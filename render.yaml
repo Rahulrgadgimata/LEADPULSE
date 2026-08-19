@@ -20,15 +20,10 @@ services:
     autoDeploy: true
 
     # ── Persistent storage ──────────────────────────────────────────────────
-    # The free instance type cannot mount a disk, so SQLite lives in the
-    # container filesystem and is wiped on every deploy, restart, and
-    # spin-down. Upgrade the plan to `starter` and uncomment this block to keep
-    # leads, users and sent-message history across restarts. SQLITE_PATH
-    # already points inside the mount path, so nothing else changes.
-    # disk:
-    #   name: leadpulse-data
-    #   mountPath: /var/data
-    #   sizeGB: 1
+    # No disk is needed: application data lives in Supabase Postgres
+    # (DATABASE_URL below). The container is disposable by design, which is
+    # what the free plan requires — it is wiped on every deploy, restart and
+    # spin-down, and that now costs only the run that was in flight.
 
     envVars:
       # ── Server ───────────────────────────────────────────────────────────
@@ -40,8 +35,11 @@ services:
       # X-Forwarded-For. Without this every request rate-limits as one caller.
       - key: TRUST_PROXY
         value: "true"
-      - key: SQLITE_PATH
-        value: /var/data/database.sqlite
+      # Supabase Postgres. The instance keeps no state of its own now, which is
+      # what makes the free plan viable: a restart, deploy or spin-down costs
+      # the run in flight, not the data.
+      - key: DATABASE_URL
+        sync: false
       # The free instance is capped at 512Mi, shared with the Python Scrapling
       # sidecar, and the container has been killed mid-discovery repeatedly.
       # Hold V8's heap well under the cgroup limit so it collects garbage

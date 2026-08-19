@@ -84,6 +84,9 @@ const Import = {
 
     const form = new FormData();
     form.append('file', file);
+
+    const fields = document.getElementById('import-fields')?.value.trim();
+    if (fields) form.append('fields', fields);
     if (mode === 'current' && window.ACTIVE_ICP?.id) {
       form.append('icpId', window.ACTIVE_ICP.id);
     } else {
@@ -116,7 +119,11 @@ const Import = {
       ? ` (first ${data.parsed.rows} of ${data.parsed.totalRows} rows)`
       : '';
 
-    this.setStatus(`Reading ${data.parsed?.rows} companies${truncated}. Columns: ${mapped}`);
+    const looking = (data.requestedFields || []).join(', ');
+    this.setStatus(
+      `Reading ${data.parsed?.rows} companies${truncated}. Columns: ${mapped}.` +
+      (looking ? ` Looking for: ${looking}.` : '')
+    );
 
     // Switch the dashboard to the ICP the rows landed in, so the leads appear
     // as they are enriched rather than in a profile the user has to go find.

@@ -6,6 +6,7 @@ const ICP = require('../models/ICP');
 const DiscoveryService = require('../services/discovery');
 const ImportService = require('../services/import');
 const { readSheet } = require('../services/import/sheetReader');
+const { parseRequestedFields } = require('../services/import/aiExtractor');
 const config = require('../config/env');
 const { query } = require('../config/database');
 const logger = require('../utils/logger');
@@ -20,6 +21,13 @@ const upload = multer({
 });
 
 const ALLOWED = new Set(['.xlsx', '.xls', '.csv']);
+
+// What an import looks for when the user does not say. These are the details
+// that make a row actionable; anything else has to be asked for.
+const DEFAULT_FIELDS = ['contact name', 'job title', 'email', 'phone', 'linkedin'];
+
+// The labels that already have their own CSV column, so the rest can be added.
+const STANDARD_LABELS = ['email', 'phone', 'contact name', 'job title', 'LinkedIn'];
 
 /**
  * Upload a spreadsheet of companies and enrich every row with contact details.
@@ -91,8 +99,14 @@ router.post('/leads', upload.single('file'), async (req, res) => {
       logger.info(`Import created ICP "${icp.name}" (${icp.id}) for ${sheet.rows.length} rows.`);
     }
 
+    // What the user wants for each company. Free text, because the useful
+    // answer is not a fixed list — "owner name, email, tech stack, franchise
+    // count" is as valid a request as the standard contact fields.
+    const fields = parseRequestedFields(req.body.fields) ;
+    const requested = fields.length ? fields : DEFAULT_FIELDS;
+
     const updateProgress = DiscoveryService.progressWriter;
-    const job = DiscoveryService.enqueueJob({
+    const job = await DiscoveryService.enqueueJob({
       icp,
       label: 'Import',
       triggerType: 'import',
@@ -101,9 +115,10 @@ router.post('/leads', upload.single('file'), async (req, res) => {
         const { stats } = await ImportService.run(jobId, {
           icpId: icp.id,
           rows: sheet.rows,
-          updateProgress: updateProgress(jobId)
+          updateProgress: updateProgress(jobId),
+          fields: requested
         });
-        DiscoveryService.completeJob(jobId, ImportService.summarise(stats));
+        await DiscoveryService.completeJob(jobId, ImportService.summarise(stats));
       }
     });
 
@@ -117,7 +132,10 @@ router.post('/leads', upload.single('file'), async (req, res) => {
         columns: sheet.columns,
         sheetName: sheet.sheetName
       },
-      message: `Importing ${sheet.rows.length} companies and looking up their contact details`
+      requestedFields: requested,
+      message:
+        `Importing ${sheet.rows.length} companies and looking for ` +
+        `${requested.join(', ')}`
     });
   } catch (err) {
     logger.error('Sheet import failed:', err);
@@ -131,11 +149,11 @@ router.post('/leads', upload.single('file'), async (req, res) => {
  * those two, and the difference is what tells the user whether to go looking
  * themselves.
  */
-router.get('/report/:jobId', (req, res) => {
-  const job = query(
+router.get('/report/:jobId', async (req, res) => {
+  const job = (await query(
     'SELECT id, status, status_text, result_json FROM discovery_jobs WHERE id = ?',
     [req.params.jobId]
-  ).rows[0];
+  )).rows[0];
 
   if (!job) return res.status(404).json({ error: 'Import job not found.' });
   if (!job.result_json) {
@@ -158,18 +176,32 @@ router.get('/report/:jobId', (req, res) => {
  * explicit "not found" wherever the pipeline came up empty — which is the
  * artefact most people actually want out of an import.
  */
-router.get('/report/:jobId.csv', (req, res) => {
-  const job = query(
+router.get('/report/:jobId.csv', async (req, res) => {
+  const job = (await query(
     'SELECT id, result_json FROM discovery_jobs WHERE id = ?',
     [req.params.jobId]
-  ).rows[0];
+  )).rows[0];
 
   if (!job || !job.result_json) {
     return res.status(404).json({ error: 'No finished import report for that job.' });
   }
 
   const { rows = [] } = JSON.parse(job.result_json);
-  const header = ['Company', 'Website', 'Email', 'Phone', 'Contact name', 'Job title', 'LinkedIn', 'Result'];
+
+  // Whatever the import was asked to find, in the order it appears in the
+  // results — a fixed header would silently drop the custom fields that were
+  // the reason for asking.
+  const extras = [];
+  for (const entry of rows) {
+    for (const key of Object.keys(entry.found || {})) {
+      if (!STANDARD_LABELS.includes(key) && !extras.includes(key)) extras.push(key);
+    }
+  }
+
+  const header = [
+    'Company', 'Website', 'Email', 'Phone', 'Contact name', 'Job title', 'LinkedIn',
+    ...extras, 'Result'
+  ];
 
   const escape = value => {
     const text = value == null ? '' : String(value);
@@ -190,6 +222,7 @@ router.get('/report/:jobId.csv', (req, res) => {
       cell(entry, 'contact name'),
       cell(entry, 'job title'),
       cell(entry, 'LinkedIn'),
+      ...extras.map(key => cell(entry, key)),
       entry.status + (entry.note ? ` — ${entry.note}` : '')
     ].map(escape).join(','));
   }

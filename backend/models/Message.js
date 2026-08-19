@@ -39,7 +39,7 @@ class Message {
       unsubscribe_token, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-    query(sql, [
+    await query(sql, [
       id,
       data.lead_id || null,
       data.icp_id || null,
@@ -71,13 +71,13 @@ class Message {
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM messages WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM messages WHERE id = ?', [id]);
     return result.rows[0] || null;
   }
 
   static async findByUnsubscribeToken(token) {
     if (!token) return null;
-    const result = query('SELECT * FROM messages WHERE unsubscribe_token = ?', [token]);
+    const result = await query('SELECT * FROM messages WHERE unsubscribe_token = ?', [token]);
     return result.rows[0] || null;
   }
 
@@ -108,7 +108,7 @@ class Message {
 
     params.push(Number(limit) || 100, Number(offset) || 0);
 
-    const result = query(
+    const result = await query(
       `SELECT m.*, l.company_name, l.contact_name, l.contact_title,
               l.company_website, s.total_score, s.tier
        FROM messages m
@@ -127,7 +127,7 @@ class Message {
    * backlog drains in the order the user asked for.
    */
   static async listDue(now = new Date().toISOString(), limit = 25) {
-    const result = query(
+    const result = await query(
       `SELECT * FROM messages
        WHERE status = 'scheduled' AND scheduled_at IS NOT NULL AND scheduled_at <= ?
        ORDER BY scheduled_at ASC
@@ -140,7 +140,7 @@ class Message {
   /** How many messages actually went out in the last 24 hours. */
   static async sentInLastDay() {
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const result = query(
+    const result = await query(
       `SELECT COUNT(*) AS count FROM messages WHERE status = 'sent' AND sent_at >= ?`,
       [since]
     );
@@ -160,7 +160,7 @@ class Message {
     for (const [key, value] of Object.entries(updates)) {
       if (!allowed.includes(key)) continue;
       fields.push(`${key} = ?`);
-      // better-sqlite3 rejects objects and booleans, so anything structured is
+      // Structured values have no column type here, so anything structured is
       // stored as JSON text — matching how personalisation is written.
       if (value !== null && typeof value === 'object') params.push(JSON.stringify(value));
       else if (typeof value === 'boolean') params.push(value ? 1 : 0);
@@ -172,12 +172,12 @@ class Message {
     fields.push('updated_at = ?');
     params.push(new Date().toISOString(), id);
 
-    query(`UPDATE messages SET ${fields.join(', ')} WHERE id = ?`, params);
+    await query(`UPDATE messages SET ${fields.join(', ')} WHERE id = ?`, params);
     return this.findById(id);
   }
 
   static async delete(id) {
-    const result = query('DELETE FROM messages WHERE id = ?', [id]);
+    const result = await query('DELETE FROM messages WHERE id = ?', [id]);
     return result.rowCount > 0;
   }
 
@@ -191,7 +191,7 @@ class Message {
    */
   static async claimForSending(id) {
     const now = new Date().toISOString();
-    const result = query(
+    const result = await query(
       `UPDATE messages SET status = 'sending', updated_at = ?
        WHERE id = ? AND status IN ('draft', 'scheduled', 'failed')`,
       [now, id]
@@ -202,7 +202,7 @@ class Message {
 
   /** Counts for the outreach dashboard header. */
   static async getStats() {
-    const rows = query('SELECT status, COUNT(*) AS count FROM messages GROUP BY status').rows;
+    const rows = (await query('SELECT status, COUNT(*) AS count FROM messages GROUP BY status')).rows;
     const byStatus = {};
     for (const row of rows) byStatus[row.status] = row.count;
 

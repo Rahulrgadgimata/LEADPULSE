@@ -58,13 +58,14 @@ function api(method, urlPath, body) {
   });
 }
 
-// Values that must differ from a developer's machine. SQLITE_PATH points at
-// Render's disk mount path; SCRAPLING_PYTHON is `py` locally (Windows launcher)
-// and `python3` in the container.
+// Values that must differ from a developer's machine. SCRAPLING_PYTHON is `py`
+// locally (the Windows launcher) and `python3` in the container.
+//
+// DATABASE_URL is deliberately absent: it is a secret that comes from .env like
+// the API keys, and it is now the only place application data lives.
 const overrides = {
   NODE_ENV: 'production',
   TRUST_PROXY: 'true',
-  SQLITE_PATH: '/var/data/database.sqlite',
   SCRAPLING_ENABLED: 'true',
   SCRAPLING_HOST: '127.0.0.1',
   SCRAPLING_PORT: '3765',

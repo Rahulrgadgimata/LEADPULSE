@@ -28,7 +28,7 @@ class MessageTemplate {
     const id = uuidv4();
     const now = new Date().toISOString();
 
-    query(
+    await query(
       `INSERT INTO message_templates
          (id, name, subject, body, channel, tags, times_used, source_message_id, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
@@ -49,12 +49,12 @@ class MessageTemplate {
   }
 
   static async findById(id) {
-    const result = query('SELECT * FROM message_templates WHERE id = ?', [id]);
+    const result = await query('SELECT * FROM message_templates WHERE id = ?', [id]);
     return result.rows[0] || null;
   }
 
   static async list() {
-    const result = query('SELECT * FROM message_templates ORDER BY times_used DESC, created_at DESC');
+    const result = await query('SELECT * FROM message_templates ORDER BY times_used DESC, created_at DESC');
     return result.rows;
   }
 
@@ -74,12 +74,12 @@ class MessageTemplate {
     fields.push('updated_at = ?');
     params.push(new Date().toISOString(), id);
 
-    query(`UPDATE message_templates SET ${fields.join(', ')} WHERE id = ?`, params);
+    await query(`UPDATE message_templates SET ${fields.join(', ')} WHERE id = ?`, params);
     return this.findById(id);
   }
 
   static async delete(id) {
-    const result = query('DELETE FROM message_templates WHERE id = ?', [id]);
+    const result = await query('DELETE FROM message_templates WHERE id = ?', [id]);
     return result.rowCount > 0;
   }
 
@@ -88,7 +88,7 @@ class MessageTemplate {
    * the picker so the templates that actually get used rise to the top.
    */
   static async recordUse(id) {
-    query('UPDATE message_templates SET times_used = times_used + 1 WHERE id = ?', [id]);
+    await query('UPDATE message_templates SET times_used = times_used + 1 WHERE id = ?', [id]);
   }
 
   /**

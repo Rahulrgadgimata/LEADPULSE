@@ -30,7 +30,7 @@ router.post('/override/:leadId', async (req, res) => {
 // Get score history for a lead
 router.get('/history/:leadId', async (req, res) => {
   try {
-    const result = query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at ASC', [req.params.leadId]);
+    const result = await query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at ASC', [req.params.leadId]);
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });

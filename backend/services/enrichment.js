@@ -21,7 +21,7 @@ const firecrawl = require('./firecrawlClient');
 class EnrichmentService {
   static async enrich(leadId) {
     try {
-      const result = query('SELECT * FROM leads WHERE id = ?', [leadId]);
+      const result = await query('SELECT * FROM leads WHERE id = ?', [leadId]);
       const lead = result.rows[0];
       if (!lead) return null;
 
@@ -172,7 +172,7 @@ class EnrichmentService {
         fields.push('updated_at = ?');
         params.push(new Date().toISOString());
         params.push(leadId);
-        query(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`, params);
+        await query(`UPDATE leads SET ${fields.join(', ')} WHERE id = ?`, params);
         logger.info(`Lead enriched: ${lead.company_name} ← ${Object.keys(clean).join(', ')}`);
         return { ...lead, ...clean };
       }
@@ -407,7 +407,7 @@ class EnrichmentService {
   /** The buyer titles this lead's ICP targets, best-match first. */
   static async _icpTitlesFor(icpId) {
     if (!icpId) return [];
-    const row = query('SELECT job_titles FROM icps WHERE id = ?', [icpId]).rows[0];
+    const row = (await query('SELECT job_titles FROM icps WHERE id = ?', [icpId])).rows[0];
     if (!row) return [];
     try {
       const parsed = JSON.parse(row.job_titles || '[]');

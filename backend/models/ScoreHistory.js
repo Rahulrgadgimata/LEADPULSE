@@ -11,12 +11,12 @@ class ScoreHistory {
                  VALUES (?, ?, ?, ?)`;
     const id = uuidv4();
     const now = new Date().toISOString();
-    query(sql, [id, leadId, totalScore, now]);
+    await query(sql, [id, leadId, totalScore, now]);
     return { id, lead_id: leadId, total_score: totalScore, recorded_at: now };
   }
 
   static async listByLead(leadId) {
-    const result = query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at DESC', [leadId]);
+    const result = await query('SELECT * FROM score_history WHERE lead_id = ? ORDER BY recorded_at DESC', [leadId]);
     return result.rows;
   }
 }

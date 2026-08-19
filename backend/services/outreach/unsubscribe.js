@@ -160,7 +160,7 @@ async function processReply({ replyText, email = null, leadId = null }) {
   // lead's own review status can be updated too.
   let resolvedLeadId = leadId;
   if (!resolvedLeadId) {
-    const found = query('SELECT id FROM leads WHERE LOWER(contact_email) = ? LIMIT 1', [address]).rows[0];
+    const found = (await query('SELECT id FROM leads WHERE LOWER(contact_email) = ? LIMIT 1', [address])).rows[0];
     resolvedLeadId = found?.id || null;
   }
 
@@ -172,7 +172,7 @@ async function processReply({ replyText, email = null, leadId = null }) {
     lead_id: resolvedLeadId,
   });
 
-  const cancelled = query(
+  const cancelled = await query(
     `UPDATE messages SET status = 'cancelled',
             error_message = 'Cancelled: recipient opted out',
             updated_at = ?
