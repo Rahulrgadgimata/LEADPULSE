@@ -124,11 +124,21 @@ const overrides = {
   CRAWL_MAX_PAGES: '10',
   CRAWL_PAGES_TO_READ: '5',
   CRAWL_MAX_DEPTH: '2',
+
+  // Rows per import that may spend a model call or a Maps credit. Groq allows
+  // 1000 requests a day across everything this app does, so an import is not
+  // permitted to consume the day in one upload.
+  IMPORT_AI_EXTRACTIONS: '25',
+  IMPORT_MAPS_LOOKUPS: '15',
 };
 
 // Render injects PORT itself and routes to whatever the service binds. Copying
 // the local PORT over that makes the two disagree, so it never gets synced.
-const NEVER_SYNC = new Set(['PORT']);
+//
+// SQLITE_PATH is deleted rather than merely unset: the service still carries it
+// from before the move to Postgres, and a stale variable naming a database that
+// no longer exists is a trap for whoever reads the dashboard next.
+const NEVER_SYNC = new Set(['PORT', 'SQLITE_PATH']);
 
 function readDotEnv() {
   const vars = {};
