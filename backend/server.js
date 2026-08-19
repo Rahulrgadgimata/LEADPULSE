@@ -11,21 +11,41 @@ const { validateConfig } = require('./config/validate');
 // Fail fast on bad production config before anything binds a port.
 validateConfig();
 
-// The schema now lives in Postgres, so it has to exist before anything queries
-// it — and the orphan sweep below is itself a query. Both happen before the
-// port is bound, so no request can arrive against a half-built database.
-const databaseReady = require('./config/database').init()
-  .then(async () => {
-    // Discovery runs in-process, so any job that was executing when the
-    // previous process exited is dead. Reconcile immediately rather than
-    // leaving rows that report 'running' and block new runs.
-    const swept = await require('./services/discovery').sweepStalledJobs(true);
-    if (swept > 0) logger.warn(`Reconciled ${swept} discovery job(s) orphaned by a previous shutdown.`);
-  })
-  .catch(err => {
-    logger.error(`Database initialisation failed: ${err.message}`);
-    throw err;
-  });
+// Database readiness, tracked rather than awaited before binding the port.
+//
+// An earlier version exited when the database was unreachable, on the reasoning
+// that serving requests against a half-built schema is worse than not serving
+// at all. That was wrong in one specific and costly way: the platform decides a
+// service that never opens a port is a failed deploy, so a wrong connection
+// string took the whole site down *and* made it impossible to deploy the fix.
+// Binding the port keeps the UI up, keeps logs reachable, and lets a corrected
+// DATABASE_URL recover the process without a rebuild.
+const dbState = { ready: false, error: null, attempts: 0 };
+
+function connectDatabase() {
+  dbState.attempts++;
+  return require('./config/database').init()
+    .then(async () => {
+      dbState.ready = true;
+      dbState.error = null;
+      // Discovery runs in-process, so any job that was executing when the
+      // previous process exited is dead. Reconcile immediately rather than
+      // leaving rows that report 'running' and block new runs.
+      const swept = await require('./services/discovery').sweepStalledJobs(true);
+      if (swept > 0) logger.warn(`Reconciled ${swept} discovery job(s) orphaned by a previous shutdown.`);
+    })
+    .catch(err => {
+      dbState.ready = false;
+      dbState.error = err.message;
+      logger.error(`Database unavailable (attempt ${dbState.attempts}): ${err.message}`);
+      // Keep trying: the usual cause is a connection string that is about to be
+      // corrected, and recovering on its own beats needing a redeploy.
+      const retry = setTimeout(connectDatabase, Math.min(30000 * dbState.attempts, 300000));
+      if (typeof retry.unref === 'function') retry.unref();
+    });
+}
+
+const databaseReady = connectDatabase();
 
 // Route imports
 const authRoutes = require('./routes/auth');
@@ -101,6 +121,10 @@ app.get('/health', (req, res) => {
     status: 'ok',
     service: 'LeadPulse AI',
     version: '1.0.0',
+    // Reported, not enforced: a failing database must not make the service
+    // unroutable, or the fix cannot be deployed.
+    database: dbState.ready ? 'connected' : 'unavailable',
+    databaseError: dbState.error || undefined,
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
   });
@@ -132,6 +156,18 @@ const authLimiter = rateLimit({
 });
 
 app.use('/api', generalLimiter);
+
+// Anything that reads or writes data says so plainly while the database is
+// unreachable, instead of failing request by request with a driver error.
+app.use('/api', (req, res, next) => {
+  if (dbState.ready) return next();
+  if (req.path === '/status' || req.path === '' || req.path === '/') return next();
+  res.status(503).json({
+    error: 'The database is unreachable, so no data can be read or written right now.',
+    detail: dbState.error,
+    retrying: true
+  });
+});
 
 app.use('/api/auth', authLimiter, authRoutes);
 app.use('/api/discovery/run', discoveryLimiter);
@@ -323,13 +359,19 @@ const PORT = config.PORT;
 // half-built database would fail them one by one with confusing errors; a
 // database that cannot be reached at all should stop the boot outright, so the
 // platform restarts us rather than running a broken instance.
-databaseReady.then(() => {
+// Bound immediately; the database connects (and reconnects) alongside.
+{
   app.listen(PORT, () => {
     logger.info(`═══════════════════════════════════════════════`);
     logger.info(`  LeadPulse AI Server running on port ${PORT}`);
     logger.info(`  UI: http://localhost:${PORT}`);
     logger.info(`  API: http://localhost:${PORT}/api`);
     logger.info(`═══════════════════════════════════════════════`);
+
+    databaseReady.then(() => {
+      if (dbState.ready) logger.info('Database connected.');
+      else logger.warn('Serving without a database until the connection recovers.');
+    });
 
     // Scheduled sends are polled from the database rather than held in memory,
     // so messages that came due while the process was down still go out — the
@@ -345,9 +387,6 @@ databaseReady.then(() => {
       }).catch(err => logger.warn(`Scrapling boot: ${err.message}`));
     }
   });
-}).catch(err => {
-  logger.error(`Server did not start: ${err.message}`);
-  process.exit(1);
-});
+}
 
 module.exports = app;
